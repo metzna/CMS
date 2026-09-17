@@ -1,0 +1,27 @@
+baseURL = 'https://example.org/'
+languageCode = 'de-de'
+title = 'Meine Seite'
+
+[params]
+  description = 'Eine kleine Hugo-Seite.'
+
+[menu]
+  [[menu.main]]
+    name = 'Start'
+    url = '/'
+    weight = 1
+  [[menu.main]]
+    name = 'Blog'
+    url = '/posts/'
+    weight = 2
+  [[menu.main]]
+    name = 'Veranstaltungen'
+    url = '/veranstaltungen/'
+    weight = 3
+  [[menu.main]]
+    name = 'Über'
+    url = '/ueber/'
+    weight = 4
+
+[markup.goldmark.renderer]
+  unsafe = true

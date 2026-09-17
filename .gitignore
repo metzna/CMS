@@ -1,0 +1,10 @@
+# Hugo-Build
+website/public/
+website/resources/
+.hugo_build.lock
+
+# Python
+__pycache__/
+*.pyc
+
+.DS_Store

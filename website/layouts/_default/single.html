@@ -1,0 +1,9 @@
+{{ define "main" }}
+  <article class="content">
+    <h1>{{ .Title }}</h1>
+    {{ if and (not .Date.IsZero) (eq .Section "posts") }}
+      <p class="meta"><time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "02.01.2006" }}</time></p>
+    {{ end }}
+    {{ .Content }}
+  </article>
+{{ end }}

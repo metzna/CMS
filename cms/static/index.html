@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CMS</title>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Vor dem Rendern setzen, sonst blitzt kurz das falsche Schema auf.
+    try {
+      const gewaehlt = localStorage.getItem("cms-theme");
+      if (gewaehlt === "light" || gewaehlt === "dark") {
+        document.documentElement.dataset.theme = gewaehlt;
+      }
+    } catch (fehler) { /* kein Zugriff auf localStorage: dann eben System */ }
+  </script>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <label class="section-picker">
+        <span class="visually-hidden">Sektion</span>
+        <select id="section"></select>
+      </label>
+      <button id="new-post" type="button">+ Neu</button>
+    </div>
+    <ul id="post-list" class="post-list"></ul>
+    <div class="sidebar-foot">
+      <button id="theme" type="button" aria-live="polite">Darstellung: System</button>
+    </div>
+  </aside>
+
+  <main class="editor">
+    <form id="post-form" hidden>
+      <div class="fields">
+        <label class="field grow">
+          <span>Titel</span>
+          <input id="title" name="title" type="text" required autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Datum</span>
+          <input id="date" name="date" type="date" required>
+        </label>
+        <label class="field check">
+          <input id="draft" name="draft" type="checkbox">
+          <span>Entwurf</span>
+        </label>
+      </div>
+
+      <div class="toolbar">
+        <span id="filename" class="filename"></span>
+        <div class="toolbar-right">
+          <button id="toggle-preview" type="button">Vorschau</button>
+          <button type="submit" class="primary">Speichern</button>
+        </div>
+      </div>
+
+      <div class="panes">
+        <textarea id="body" name="body" spellcheck="false"
+                  placeholder="Text in Markdown …"></textarea>
+        <div id="preview" class="preview" hidden></div>
+      </div>
+    </form>
+
+    <p id="empty" class="empty">Links einen Beitrag wählen oder einen neuen anlegen.</p>
+    <p id="status" class="status" role="status"></p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
