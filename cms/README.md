@@ -10,8 +10,10 @@ Sektion ist auf genau einen Ordner verknüpft.
 python3 cms/server.py          # http://127.0.0.1:8080
 ```
 
-Nur die Python-Standardbibliothek, nichts zu installieren.
-Optionen: `--port`, `--host`, `--content <ordner>`, `--config <datei>`.
+Nur die Python-Standardbibliothek, nichts zu installieren — ausser Hugo
+selbst, das nach jedem Schreiben laeuft.
+Optionen: `--port`, `--host`, `--content <ordner>`, `--config <datei>`,
+`--hugo <programm>`, `--kein-build`.
 
 Ein Prozess bedient genau eine Seite. Fuer eine zweite Seite einen zweiten
 Prozess starten:
@@ -20,10 +22,27 @@ Prozess starten:
 python3 cms/server.py --port 8081 --content /srv/kunde-b/website/content
 ```
 
-Zum Gegenlesen parallel den Hugo-Server laufen lassen:
+## Erzeugen der Seite
+
+Nach jedem Speichern und Loeschen laeuft `hugo` im Ordner ueber `content/`
+und schreibt `public/` neu — die Aenderung ist also sofort auf der Seite. Fuer
+diese Seite dauert das rund 60 ms, darum passiert es synchron: die Antwort
+sagt schon, ob es geklappt hat, und die Oberflaeche zeigt es neben
+„Speichern“ als Ring und danach als Haken.
+
+Scheitert der Build, ist der Text trotzdem gespeichert. Die Statuszeile sagt
+dann, dass die Seite nicht neu erzeugt wurde, und nennt Hugos Meldung; die
+volle Ausgabe steht im Protokoll des Servers.
+
+Gebaut wird mit `--cleanDestinationDir`, damit ein geloeschter Beitrag auch
+aus `public/` verschwindet und nicht fuer Besucher erreichbar bleibt.
+
+Wer beim Entwickeln ohnehin `hugo server` laufen laesst, schaltet den Build
+mit `--kein-build` ab:
 
 ```bash
 cd website && hugo server --buildDrafts
+python3 cms/server.py --kein-build
 ```
 
 ## Konfiguration
@@ -69,7 +88,7 @@ Fehlt der Ordner, erscheint die Sektion in der Auswahl als
   entsteht aus dem Titel (`Herbstlesung im Hof` → `herbstlesung-im-hof.md`),
   bei Namensgleichheit mit angehängter Nummer.
 - **Vorschau** blendet die gerenderte Ansicht neben den Editor.
-- **Speichern** oder `Strg+S` schreibt die Datei.
+- **Speichern** oder `Strg+S` schreibt die Datei und erzeugt die Seite neu.
 - **Löschen** entfernt den offenen Eintrag nach einer Rückfrage. Die Datei
   ist danach weg — kein Papierkorb. Bei einem noch nicht gespeicherten
   Eintrag erscheint der Knopf nicht.
@@ -82,8 +101,9 @@ Fehlt der Ordner, erscheint die Sektion in der Auswahl als
 - Kein Umbenennen: dafür die Datei direkt im Ordner anfassen. Gelöschtes
   holt nur `git checkout` zurück, sofern es eingecheckt war.
 - `_index.md` der Sektionen wird nicht angetastet.
-- Keine Anmeldung. Der Server bindet auf `127.0.0.1` und gehört nicht
-  ins offene Netz.
+- Keine Anmeldung im Server selbst. Er bindet auf `127.0.0.1` und gehört
+  nicht ins offene Netz. Für den Betrieb mit Kundenzugängen steht die
+  Anmeldung davor: siehe `betrieb/README.md` und `cms/auth.py`.
 - Im Titel sind `"` und `\` nicht erlaubt; der Titel steht im Frontmatter als
   `title: "..."`, wo `"` den Wert abbricht und `\` eine Escape-Sequenz
   beginnt — beides macht die Datei fuer Hugo unlesbar. Das Eingabefeld meldet

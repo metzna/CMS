@@ -179,6 +179,29 @@ button.danger:hover { border-color: var(--warn); }
 .toolbar-right { display: flex; gap: 0.5rem; margin-left: auto; }
 .filename { color: var(--muted); font-size: 0.85rem; font-family: ui-monospace, monospace; }
 
+/* Ladesymbol neben "Speichern": Ring waehrend des Bauens, danach ein Haken. */
+.bau { width: 1.1rem; height: 1.1rem; flex: none; align-self: center; }
+.bau.laeuft {
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: dreht 0.7s linear infinite;
+}
+.bau.fertig, .bau.fehler {
+  display: grid;
+  place-items: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.bau.fertig { color: var(--accent); }
+.bau.fertig::after { content: "\2713"; }
+.bau.fehler { color: var(--warn); }
+.bau.fehler::after { content: "\2717"; }
+@keyframes dreht { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .bau.laeuft { animation-duration: 2s; }
+}
+
 .panes { display: flex; flex: 1; gap: 1rem; min-height: 0; }
 
 textarea {

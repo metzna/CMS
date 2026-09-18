@@ -1,0 +1,19 @@
+# /etc/systemd/system/cms-auth@.service  ->  systemctl enable --now cms-auth@kunde-a
+# Je Website ein Anmeldedienst, wie je Website eine CMS-Instanz.
+[Unit]
+Description=Anmeldung fuer %i
+After=network.target
+
+[Service]
+User=cms-%i
+EnvironmentFile=/etc/cms/%i.env
+ExecStart=/usr/bin/python3 -u /opt/cms/auth.py --config /etc/cms/%i/auth.toml --port ${AUTH_PORT}
+Restart=on-failure
+
+ProtectSystem=strict
+ReadWritePaths=/etc/cms/%i
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

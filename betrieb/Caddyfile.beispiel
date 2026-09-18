@@ -1,0 +1,39 @@
+# Beispiel fuer eine Website. Je Website ein solcher Block -- am besten von
+# der Bereitstellung erzeugt und per "import kunden/*.caddy" eingebunden.
+#
+# Dazu gehoert ein zweiter Block fuer die oeffentliche Seite selbst:
+#
+#     kunde-a.de {
+#         root * /srv/kunden/kunde-a/site/website/public
+#         file_server
+#     }
+#
+# Caddy holt die Zertifikate allein, sofern die Namen auf den Server zeigen.
+
+cms.kunde-a.de {
+
+    # Anmeldung: geht am Waechter vorbei, sonst kaeme man nie zum Formular.
+    # 9001 ist der Anmeldedienst DIESER Seite -- je Website ein eigener.
+    handle /login* {
+        reverse_proxy 127.0.0.1:9001
+    }
+    handle /abmelden {
+        reverse_proxy 127.0.0.1:9001
+    }
+
+    # Alles andere nur mit gueltiger Sitzung. forward_auth fragt vor jedem
+    # Request bei /pruefen nach; 200 laesst durch, 302 schickt zum Login.
+    handle {
+        forward_auth 127.0.0.1:9001 {
+            uri /pruefen
+            header_up X-Forwarded-Host {host}
+            header_up X-Forwarded-Uri {uri}
+        }
+        reverse_proxy 127.0.0.1:8081
+    }
+
+    encode zstd gzip
+    log {
+        output file /var/log/caddy/cms.kunde-a.log
+    }
+}

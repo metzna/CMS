@@ -1,0 +1,20 @@
+# Zugang zu dieser einen Website. Gehoert neben die Seite, nicht ins Repo --
+# hier steht ein Passwort-Hash.
+#
+# Hash erzeugen:
+#     python3 cms/auth.py --passwort
+#
+# Der Sitzungsschluessel liegt daneben in auth.key (entsteht beim ersten
+# Start, Rechte 0600). Wird er geloescht, ist jede Sitzung ungueltig -- so
+# meldet man alle Angemeldeten auf einmal ab.
+
+# MUSS. Unter dieser Adresse laeuft die Oberflaeche. Muss zum Caddy-Block
+# passen: kommt eine Anfrage mit anderem Host an, lehnt der Dienst sie ab.
+host = "cms.kunde-a.de"
+
+# KANN. Ueberschrift der Loginseite. Vorgabe: host.
+name = "Bäckerei Meier"
+
+# MUSS. Genau ein Zugang je Website.
+benutzer = "meier"
+passwort = "scrypt$16384$8$1$…$…"

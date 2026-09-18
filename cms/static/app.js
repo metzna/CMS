@@ -12,6 +12,7 @@ const previewEl = document.getElementById("preview");
 const filenameEl = document.getElementById("filename");
 const previewBtn = document.getElementById("toggle-preview");
 const deleteBtn = document.getElementById("delete");
+const bauEl = document.getElementById("bau");
 const sectionEl = document.getElementById("section");
 const themeBtn = document.getElementById("theme");
 
@@ -155,6 +156,32 @@ function renderMarkdown(quelle) {
 
 function vorschauAktualisieren() {
   if (!previewEl.hidden) previewEl.innerHTML = renderMarkdown(bodyEl.value);
+}
+
+/* --- Baustand --------------------------------------------------------- */
+
+// "" | "laeuft" | "fertig" | "fehler". Der Haken verschwindet von allein,
+// das Kreuz bleibt stehen -- dazu steht der Grund in der Statuszeile.
+let bauTimer = null;
+
+function bauStand(zustand) {
+  clearTimeout(bauTimer);
+  bauEl.className = zustand ? `bau ${zustand}` : "bau";
+  if (zustand === "fertig") {
+    bauTimer = setTimeout(() => { bauEl.className = "bau"; }, 2500);
+  }
+}
+
+// Antworten der schreibenden Routen tragen ein build-Feld. Gibt zurueck,
+// ob die Seite neu erzeugt wurde -- geschrieben wurde sie in jedem Fall.
+function bauMelden(antwort, erfolgstext, vorspann) {
+  const bau = antwort.build;
+  if (bau && !bau.ok) {
+    melde(`${vorspann}, aber die Seite wurde nicht neu erzeugt: ${bau.meldung}`, true);
+    return false;
+  }
+  melde(erfolgstext);
+  return true;
 }
 
 /* --- Daten ------------------------------------------------------------ */
@@ -307,6 +334,7 @@ async function speichern(event) {
   };
   const pfad = entriesPfad(aktuell);
 
+  bauStand("laeuft");
   try {
     const post = await api(pfad, optionen);
     const warNeu = !aktuell;
@@ -315,8 +343,9 @@ async function speichern(event) {
     deleteBtn.hidden = false;
     await listeLaden();
     if (warNeu) await zaehlerAuffrischen();
-    melde(`Gespeichert: ${post.file}`);
+    bauStand(bauMelden(post, `Gespeichert: ${post.file}`, "Gespeichert") ? "fertig" : "fehler");
   } catch (fehler) {
+    bauStand("");
     melde(fehler.message, true);
   }
 }
@@ -328,15 +357,19 @@ async function loeschen() {
     + `Die Datei ${datei} wird entfernt \u2014 hier gibt es kein Zur\u00fcck.`;
   if (!confirm(frage)) return;
 
+  bauStand("laeuft");
   try {
-    await api(entriesPfad(datei), { method: "DELETE" });
+    const antwort = await api(entriesPfad(datei), { method: "DELETE" });
     aktuell = null;
     formEl.hidden = true;
     emptyEl.hidden = false;
     await listeLaden();
     await zaehlerAuffrischen();
-    melde(`Gel\u00f6scht: ${datei}`);
+    // Das Formular ist weg, mit ihm das Symbol -- die Meldung traegt es.
+    bauStand("");
+    bauMelden(antwort, `Gel\u00f6scht: ${datei}`, "Gel\u00f6scht");
   } catch (fehler) {
+    bauStand("");
     melde(fehler.message, true);
   }
 }

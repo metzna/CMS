@@ -11,6 +11,8 @@ Start:  python3 cms/server.py
 import argparse
 import json
 import re
+import shutil
+import subprocess
 import tomllib
 import unicodedata
 from datetime import date
@@ -23,6 +25,10 @@ DEFAULT_CONTENT_DIR = BASE_DIR.parent / "website" / "content"
 
 # Welche Sektionen bearbeitbar sind, steht in cms.toml neben dem content-Ordner.
 CONFIG_NAME = "cms.toml"
+
+# Nach jedem Schreiben laeuft Hugo. Fuer diese Seite dauert das ~60 ms, darum
+# synchron: die Antwort sagt dann schon, ob die Seite wirklich neu steht.
+BUILD_TIMEOUT = 60
 
 # Nur einfache Dateinamen, kein Pfadwechsel, kein Listenindex des Abschnitts.
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\.md$")
@@ -144,6 +150,38 @@ def build_front_matter(title: str, datum: str, draft: bool, extra: list[str], bo
     return text.rstrip() + "\n"
 
 
+def hugo_bauen(site_dir: Path, hugo: str) -> dict:
+    """Baut die Seite neu.
+
+    Hugo meldet Fehler ueber den Exit-Code und schreibt den Text nach stdout
+    (nicht stderr), mit "Error:" am Zeilenanfang. --quiet verschluckt ihn,
+    deshalb laeuft Hugo hier ohne.
+
+    --cleanDestinationDir ist noetig, damit ein geloeschter Beitrag auch aus
+    public/ verschwindet -- sonst bliebe seine Seite fuer Besucher erreichbar.
+    """
+    try:
+        lauf = subprocess.run(
+            [hugo, "--cleanDestinationDir"], cwd=site_dir,
+            capture_output=True, text=True, timeout=BUILD_TIMEOUT,
+        )
+    except FileNotFoundError:
+        return {"ok": False, "meldung": f"Hugo nicht gefunden: {hugo}"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "meldung": f"Hugo antwortet seit {BUILD_TIMEOUT} s nicht."}
+    except OSError as exc:
+        return {"ok": False, "meldung": f"Hugo liess sich nicht starten: {exc}"}
+
+    if lauf.returncode == 0:
+        return {"ok": True, "meldung": ""}
+
+    ausgabe = f"{lauf.stdout}\n{lauf.stderr}"
+    zeile = next((z for z in ausgabe.splitlines() if z.startswith("Error:")), "")
+    # Absolute Pfade kuerzen -- fuer den Kunden ist der Dateiname genug.
+    meldung = zeile.replace(f"{site_dir}/", "") or f"Hugo endete mit Code {lauf.returncode}."
+    return {"ok": False, "meldung": meldung, "ausgabe": ausgabe.strip()}
+
+
 def read_entry(path: Path) -> dict:
     raw = path.read_text(encoding="utf-8")
     fields, _extra, body = parse_front_matter(raw)
@@ -184,10 +222,12 @@ def payload_to_values(data: dict) -> tuple[str, str, bool, str]:
 
 
 class CMSHandler(SimpleHTTPRequestHandler):
-    # Ein Prozess bedient eine Seite; main() setzt diese drei aus cms.toml.
+    # Ein Prozess bedient eine Seite; main() setzt diese aus cms.toml.
     content_dir: Path = DEFAULT_CONTENT_DIR
     sections: list[dict] = []
     site_title: str = "CMS"
+    site_dir: Path = DEFAULT_CONTENT_DIR.parent   # hier liegt hugo.toml
+    hugo: str | None = None                       # None = nicht bauen
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -235,6 +275,17 @@ class CMSHandler(SimpleHTTPRequestHandler):
         if path.parent != ordner:
             raise PostError("Pfad liegt ausserhalb des Sektionsordners.")
         return path
+
+    def bauen(self) -> dict:
+        """Seite neu erzeugen und das Ergebnis fuer die Antwort aufbereiten."""
+        if self.hugo is None:
+            return {"ok": True, "aus": True, "meldung": ""}
+        ergebnis = hugo_bauen(self.site_dir, self.hugo)
+        if not ergebnis["ok"]:
+            # Vollen Text ins Protokoll, in die Oberflaeche nur die eine Zeile.
+            self.log_message("Build fehlgeschlagen: %s", ergebnis.get("ausgabe", ""))
+        ergebnis.pop("ausgabe", None)
+        return ergebnis
 
     def free_path(self, section_id: str, slug: str) -> Path:
         candidate = self.entry_path(section_id, f"{slug}.md")
@@ -324,7 +375,7 @@ class CMSHandler(SimpleHTTPRequestHandler):
         path = self.free_path(section_id, slugify(title))
         path.write_text(build_front_matter(title, datum, draft, [], body), encoding="utf-8")
         self.log_message("angelegt: %s/%s", section_id, path.name)
-        self.send_json(read_entry(path), 201)
+        self.send_json({**read_entry(path), "build": self.bauen()}, 201)
 
     def update_entry(self, section_id: str, name: str) -> None:
         path = self.entry_path(section_id, name)
@@ -334,7 +385,7 @@ class CMSHandler(SimpleHTTPRequestHandler):
         _fields, extra, _body = parse_front_matter(path.read_text(encoding="utf-8"))
         path.write_text(build_front_matter(title, datum, draft, extra, body), encoding="utf-8")
         self.log_message("gespeichert: %s/%s", section_id, path.name)
-        self.send_json(read_entry(path))
+        self.send_json({**read_entry(path), "build": self.bauen()})
 
     def delete_entry(self, section_id: str, name: str) -> None:
         # entry_path haelt _index.md und Pfade ausserhalb der Sektion fern.
@@ -343,7 +394,7 @@ class CMSHandler(SimpleHTTPRequestHandler):
             raise FileNotFoundError(f"Eintrag nicht gefunden: {section_id}/{name}")
         path.unlink()
         self.log_message("geloescht: %s/%s", section_id, path.name)
-        self.send_json({"file": path.name, "deleted": True})
+        self.send_json({"file": path.name, "deleted": True, "build": self.bauen()})
 
     def guard(self, aktion) -> None:
         """Fuehrt eine Route aus und uebersetzt Fehler in JSON-Antworten."""
@@ -365,6 +416,11 @@ def main() -> None:
                         help="content-Ordner der Hugo-Seite")
     parser.add_argument("--config", type=Path, default=None,
                         help=f"{CONFIG_NAME} der Seite (Vorgabe: neben content/)")
+    parser.add_argument("--hugo", default="hugo",
+                        help="Hugo-Programm fuer den Build nach dem Speichern")
+    parser.add_argument("--kein-build", action="store_true",
+                        help="nach dem Speichern nicht bauen (z. B. wenn "
+                             "'hugo server' schon laeuft)")
     args = parser.parse_args()
 
     content_dir = args.content.resolve()
@@ -374,12 +430,26 @@ def main() -> None:
     config_path = (args.config or content_dir.parent / CONFIG_NAME).resolve()
     CMSHandler.site_title, CMSHandler.sections = load_config(config_path)
     CMSHandler.content_dir = content_dir
+    CMSHandler.site_dir = content_dir.parent
+
+    # Lieber beim Start meckern als beim ersten Speichern des Kunden.
+    if args.kein_build:
+        CMSHandler.hugo = None
+    else:
+        gefunden = shutil.which(args.hugo)
+        if gefunden is None:
+            raise SystemExit(
+                f"Hugo nicht gefunden: {args.hugo}\n"
+                f"  Pfad angeben mit --hugo, oder den Build mit --kein-build abschalten."
+            )
+        CMSHandler.hugo = gefunden
 
     server = HTTPServer((args.host, args.port), CMSHandler)
     print(f"CMS laeuft auf http://{args.host}:{args.port}")
     print(f"Seite:  {CMSHandler.site_title}")
     print(f"Konfig: {config_path}")
     print(f"Inhalte: {content_dir}")
+    print(f"Build:  {CMSHandler.hugo or 'aus (--kein-build)'}")
     for eintrag in CMSHandler.sections:
         zeichen = "" if (content_dir / eintrag["dir"]).is_dir() else "  (Ordner fehlt!)"
         print(f"  {eintrag['name']} -> {eintrag['dir']}/{zeichen}")
