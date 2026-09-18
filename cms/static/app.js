@@ -11,6 +11,7 @@ const bodyEl = document.getElementById("body");
 const previewEl = document.getElementById("preview");
 const filenameEl = document.getElementById("filename");
 const previewBtn = document.getElementById("toggle-preview");
+const deleteBtn = document.getElementById("delete");
 const sectionEl = document.getElementById("section");
 const themeBtn = document.getElementById("theme");
 
@@ -175,6 +176,13 @@ function entriesPfad(datei) {
   return datei ? `${basis}/${encodeURIComponent(datei)}` : basis;
 }
 
+async function seitentitelSetzen() {
+  try {
+    const seite = await api("/api/site");
+    if (seite.title) document.title = seite.title;
+  } catch (fehler) { /* Beiwerk: ohne Titel laeuft die Oberflaeche weiter */ }
+}
+
 async function sektionenLaden() {
   try {
     sektionen = await api("/api/sections");
@@ -248,6 +256,7 @@ function markiereAuswahl() {
 function formularZeigen() {
   formEl.hidden = false;
   emptyEl.hidden = true;
+  deleteBtn.hidden = !aktuell; // ein ungespeicherter Entwurf hat nichts zu loeschen
 }
 
 async function beitragOeffnen(datei) {
@@ -303,9 +312,30 @@ async function speichern(event) {
     const warNeu = !aktuell;
     aktuell = post.file;
     filenameEl.textContent = post.file;
+    deleteBtn.hidden = false;
     await listeLaden();
     if (warNeu) await zaehlerAuffrischen();
     melde(`Gespeichert: ${post.file}`);
+  } catch (fehler) {
+    melde(fehler.message, true);
+  }
+}
+
+async function loeschen() {
+  if (!aktuell) return;
+  const datei = aktuell;
+  const frage = `\u201e${titleEl.value.trim() || datei}\u201c l\u00f6schen?\n\n`
+    + `Die Datei ${datei} wird entfernt \u2014 hier gibt es kein Zur\u00fcck.`;
+  if (!confirm(frage)) return;
+
+  try {
+    await api(entriesPfad(datei), { method: "DELETE" });
+    aktuell = null;
+    formEl.hidden = true;
+    emptyEl.hidden = false;
+    await listeLaden();
+    await zaehlerAuffrischen();
+    melde(`Gel\u00f6scht: ${datei}`);
   } catch (fehler) {
     melde(fehler.message, true);
   }
@@ -328,6 +358,7 @@ themeBtn.addEventListener("click", () => {
   themeSetzen(naechste);
 });
 
+deleteBtn.addEventListener("click", loeschen);
 sectionEl.addEventListener("change", sektionWechseln);
 document.getElementById("new-post").addEventListener("click", neuerBeitrag);
 formEl.addEventListener("submit", speichern);
@@ -347,4 +378,5 @@ document.addEventListener("keydown", (event) => {
 });
 
 themeSetzen(themeLesen());
+seitentitelSetzen();
 sektionenLaden();

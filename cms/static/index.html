@@ -35,7 +35,11 @@
       <div class="fields">
         <label class="field grow">
           <span>Titel</span>
-          <input id="title" name="title" type="text" required autocomplete="off">
+          <!-- Kein " und kein \ im Titel: title: "..." im Frontmatter waere sonst kaputt.
+               Der Server prueft das ebenfalls, das hier meldet es nur frueher. -->
+          <input id="title" name="title" type="text" required autocomplete="off"
+                 pattern="[^&quot;\\]*"
+                 title="&quot; und \ sind im Titel nicht erlaubt.">
         </label>
         <label class="field">
           <span>Datum</span>
@@ -49,6 +53,8 @@
 
       <div class="toolbar">
         <span id="filename" class="filename"></span>
+        <!-- Links, mit Abstand zu "Speichern": ein Fehlklick waere aergerlich. -->
+        <button id="delete" type="button" class="danger" hidden>Löschen</button>
         <div class="toolbar-right">
           <button id="toggle-preview" type="button">Vorschau</button>
           <button type="submit" class="primary">Speichern</button>

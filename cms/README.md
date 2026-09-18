@@ -11,7 +11,14 @@ python3 cms/server.py          # http://127.0.0.1:8080
 ```
 
 Nur die Python-Standardbibliothek, nichts zu installieren.
-Optionen: `--port`, `--host`, `--content <ordner>`.
+Optionen: `--port`, `--host`, `--content <ordner>`, `--config <datei>`.
+
+Ein Prozess bedient genau eine Seite. Fuer eine zweite Seite einen zweiten
+Prozess starten:
+
+```bash
+python3 cms/server.py --port 8081 --content /srv/kunde-b/website/content
+```
 
 Zum Gegenlesen parallel den Hugo-Server laufen lassen:
 
@@ -19,21 +26,28 @@ Zum Gegenlesen parallel den Hugo-Server laufen lassen:
 cd website && hugo server --buildDrafts
 ```
 
-## Sektionen
+## Konfiguration
 
-Die Liste steht fest im Code, oben in `server.py`:
+Was bearbeitet werden darf, steht in `cms.toml` neben dem `content`-Ordner —
+also im Repo der Seite, nicht beim CMS. Jede Kundenseite bringt ihre eigene
+mit; mit `--config` liegt sie auch woanders.
 
-```python
-SECTIONS = [
-    {"id": "posts", "name": "Blog", "dir": "posts"},
-    {"id": "veranstaltungen", "name": "Veranstaltungen", "dir": "veranstaltungen"},
-]
+```toml
+title = "Meine Seite"     # steht im Browser-Tab der Oberfläche
+
+[[sections]]
+dir = "posts"             # Unterordner in content/ (Pflicht)
+name = "Blog"             # Beschriftung in der Auswahl (Vorgabe: dir)
+# id = "posts"            # kommt in der URL vor (Vorgabe: dir)
 ```
 
-`dir` ist der Unterordner in `website/content/`. Eine weitere Sektion
-braucht zwei Schritte:
+Ist die Datei fehlerhaft, startet der Server nicht und nennt Datei, Stelle
+und Grund. Das ist Absicht: eine kaputte Konfiguration soll beim Hochfahren
+auffallen, nicht beim ersten Klick.
 
-1. Zeile in `SECTIONS` ergänzen.
+### Weitere Sektion
+
+1. `[[sections]]`-Block in `cms.toml` ergänzen.
 2. Ordner in Hugo anlegen, mit `_index.md` für die Übersichtsseite:
 
    ```bash
@@ -43,6 +57,7 @@ braucht zwei Schritte:
 
    Für einen Menüpunkt zusätzlich einen `[[menu.main]]`-Block in
    `website/hugo.toml` eintragen.
+3. Server neu starten — `cms.toml` wird nur beim Start gelesen.
 
 Fehlt der Ordner, erscheint die Sektion in der Auswahl als
 „(Ordner fehlt)" und ist nicht anwählbar — der Server startet trotzdem.
@@ -55,16 +70,25 @@ Fehlt der Ordner, erscheint die Sektion in der Auswahl als
   bei Namensgleichheit mit angehängter Nummer.
 - **Vorschau** blendet die gerenderte Ansicht neben den Editor.
 - **Speichern** oder `Strg+S` schreibt die Datei.
+- **Löschen** entfernt den offenen Eintrag nach einer Rückfrage. Die Datei
+  ist danach weg — kein Papierkorb. Bei einem noch nicht gespeicherten
+  Eintrag erscheint der Knopf nicht.
 - **Entwurf** setzt `draft: true` — solche Einträge landen nicht im Build.
 - Unten links schaltet **Darstellung** zwischen System, Hell und Dunkel;
   die Wahl bleibt im Browser gespeichert.
 
 ## Grenzen
 
-- Kein Löschen und kein Umbenennen: dafür die Datei direkt im Ordner anfassen.
+- Kein Umbenennen: dafür die Datei direkt im Ordner anfassen. Gelöschtes
+  holt nur `git checkout` zurück, sofern es eingecheckt war.
 - `_index.md` der Sektionen wird nicht angetastet.
 - Keine Anmeldung. Der Server bindet auf `127.0.0.1` und gehört nicht
   ins offene Netz.
+- Im Titel sind `"` und `\` nicht erlaubt; der Titel steht im Frontmatter als
+  `title: "..."`, wo `"` den Wert abbricht und `\` eine Escape-Sequenz
+  beginnt — beides macht die Datei fuer Hugo unlesbar. Das Eingabefeld meldet
+  es sofort, der Server weist es mit 400 ab. Typografische
+  Anfuehrungszeichen (`„ “`, `» «`) gehen.
 - Unbekannte Frontmatter-Felder bleiben beim Speichern erhalten, wandern
   aber ans Ende des Blocks.
 - Die Vorschau ist eine Annäherung (rund 80 Zeilen JavaScript), nicht

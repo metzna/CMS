@@ -2,15 +2,16 @@
 """Kleines CMS fuer die Hugo-Seite.
 
 Bearbeitet die Markdown-Dateien in den Unterordnern von website/content/.
-Welche Ordner das sind, steht in SECTIONS -- eine Zeile pro Sektion.
+Welche Ordner das sind, steht in cms.toml neben dem content-Ordner.
 
 Start:  python3 cms/server.py
-        python3 cms/server.py --port 8000 --content ../website/content
+        python3 cms/server.py --port 8000 --content /srv/kunde-a/website/content
 """
 
 import argparse
 import json
 import re
+import tomllib
 import unicodedata
 from datetime import date
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -20,12 +21,8 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 DEFAULT_CONTENT_DIR = BASE_DIR.parent / "website" / "content"
 
-# Die bearbeitbaren Sektionen. "dir" ist ein Unterordner von website/content/.
-# Neue Sektion: hier eine Zeile ergaenzen und den Ordner in Hugo anlegen.
-SECTIONS = [
-    {"id": "posts", "name": "Blog", "dir": "posts"},
-    {"id": "veranstaltungen", "name": "Veranstaltungen", "dir": "veranstaltungen"},
-]
+# Welche Sektionen bearbeitbar sind, steht in cms.toml neben dem content-Ordner.
+CONFIG_NAME = "cms.toml"
 
 # Nur einfache Dateinamen, kein Pfadwechsel, kein Listenindex des Abschnitts.
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\.md$")
@@ -34,12 +31,59 @@ RESERVED = {"_index.md", "index.md"}
 
 # /api/sections/<id>/entries[/<datei>]
 ENTRIES_ROUTE = re.compile(r"^/api/sections/([a-z0-9][a-z0-9_-]*)/entries(?:/([^/]+))?$")
+# Muss zum Sektionsteil von ENTRIES_ROUTE passen, sonst ist die Sektion nicht erreichbar.
+SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 UMLAUTE = {"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}
 
 
 class PostError(Exception):
     """Fehler, der als 400 an die Oberflaeche zurueckgeht."""
+
+
+def load_config(path: Path) -> tuple[str, list[dict]]:
+    """Liest cms.toml und prueft sie.
+
+    Alles, was hier schiefgeht, bricht den Start ab: eine kaputte
+    Konfiguration soll beim Hochfahren auffallen, nicht beim ersten Klick.
+    """
+    try:
+        with path.open("rb") as datei:
+            daten = tomllib.load(datei)
+    except FileNotFoundError:
+        raise SystemExit(f"Konfiguration nicht gefunden: {path}")
+    except tomllib.TOMLDecodeError as exc:
+        raise SystemExit(f"{path}: kein gueltiges TOML -- {exc}")
+
+    titel = str(daten.get("title") or "").strip() or "CMS"
+    roh = daten.get("sections")
+    if not isinstance(roh, list) or not roh:
+        raise SystemExit(f"{path}: mindestens eine [[sections]]-Tabelle noetig.")
+
+    sections: list[dict] = []
+    vergeben: set[str] = set()
+    for nummer, eintrag in enumerate(roh, 1):
+        stelle = f"{path}: [[sections]] Nr. {nummer}"
+        if not isinstance(eintrag, dict):
+            raise SystemExit(f"{stelle} ist keine Tabelle.")
+        ordner = str(eintrag.get("dir") or "").strip()
+        if not SAFE_DIR.fullmatch(ordner):
+            raise SystemExit(
+                f"{stelle}: dir fehlt oder ist unzulaessig (klein, ohne "
+                f"Schraegstrich): {ordner!r}"
+            )
+        kennung = str(eintrag.get("id") or ordner).strip()
+        if not SAFE_ID.fullmatch(kennung):
+            raise SystemExit(f"{stelle}: id ist unzulaessig: {kennung!r}")
+        if kennung in vergeben:
+            raise SystemExit(f"{stelle}: id kommt mehrfach vor: {kennung!r}")
+        vergeben.add(kennung)
+        sections.append({
+            "id": kennung,
+            "name": str(eintrag.get("name") or ordner).strip(),
+            "dir": ordner,
+        })
+    return titel, sections
 
 
 def slugify(title: str) -> str:
@@ -112,10 +156,27 @@ def read_entry(path: Path) -> dict:
     }
 
 
-def payload_to_values(data: dict) -> tuple[str, str, bool, str]:
-    title = str(data.get("title", "")).strip()
+# Im Frontmatter steht der Titel als title: "...". Dort beendet " den Wert
+# vorzeitig, und \ leitet eine Escape-Sequenz ein (\b waere ein Steuerzeichen).
+TITEL_VERBOTEN = '"\\'
+
+
+def check_title(title: str) -> None:
+    """Titel muss in title: "..." passen, sonst bricht Hugos Frontmatter."""
     if not title:
         raise PostError("Titel fehlt.")
+    schlecht = [zeichen for zeichen in TITEL_VERBOTEN if zeichen in title]
+    if schlecht:
+        hinweis = ' Stattdessen \u201e \u201c oder \u00bb \u00ab nehmen.' if '"' in title else ""
+        raise PostError(
+            f'Titel darf kein {" und ".join(schlecht)} enthalten \u2014 Hugo kann '
+            f'den Frontmatter sonst nicht lesen.{hinweis}'
+        )
+
+
+def payload_to_values(data: dict) -> tuple[str, str, bool, str]:
+    title = str(data.get("title", "")).strip()
+    check_title(title)
     datum = str(data.get("date", "")).strip() or date.today().isoformat()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", datum):
         raise PostError("Datum muss im Format JJJJ-MM-TT stehen.")
@@ -123,7 +184,10 @@ def payload_to_values(data: dict) -> tuple[str, str, bool, str]:
 
 
 class CMSHandler(SimpleHTTPRequestHandler):
+    # Ein Prozess bedient eine Seite; main() setzt diese drei aus cms.toml.
     content_dir: Path = DEFAULT_CONTENT_DIR
+    sections: list[dict] = []
+    site_title: str = "CMS"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -147,7 +211,7 @@ class CMSHandler(SimpleHTTPRequestHandler):
             raise PostError(f"Ungueltiges JSON: {exc}") from exc
 
     def section(self, section_id: str) -> dict:
-        for eintrag in SECTIONS:
+        for eintrag in self.sections:
             if eintrag["id"] == section_id:
                 return eintrag
         raise FileNotFoundError(f"Sektion nicht gefunden: {section_id}")
@@ -182,6 +246,9 @@ class CMSHandler(SimpleHTTPRequestHandler):
 
     # --- Routen -------------------------------------------------------
     def do_GET(self) -> None:
+        if self.path == "/api/site":
+            self.guard(lambda: self.send_json({"title": self.site_title}))
+            return
         if self.path == "/api/sections":
             self.guard(lambda: self.send_json(self.list_sections()))
             return
@@ -212,10 +279,17 @@ class CMSHandler(SimpleHTTPRequestHandler):
             return
         self.send_json({"error": "Unbekannte Route."}, 404)
 
+    def do_DELETE(self) -> None:
+        treffer = ENTRIES_ROUTE.fullmatch(self.path)
+        if treffer and treffer.group(2):
+            self.guard(lambda: self.delete_entry(treffer.group(1), treffer.group(2)))
+            return
+        self.send_json({"error": "Unbekannte Route."}, 404)
+
     # --- Aktionen -----------------------------------------------------
     def list_sections(self) -> list[dict]:
         liste = []
-        for eintrag in SECTIONS:
+        for eintrag in self.sections:
             daten = dict(eintrag)
             try:
                 daten["count"] = len(self.entry_paths(eintrag["id"]))
@@ -262,6 +336,15 @@ class CMSHandler(SimpleHTTPRequestHandler):
         self.log_message("gespeichert: %s/%s", section_id, path.name)
         self.send_json(read_entry(path))
 
+    def delete_entry(self, section_id: str, name: str) -> None:
+        # entry_path haelt _index.md und Pfade ausserhalb der Sektion fern.
+        path = self.entry_path(section_id, name)
+        if not path.exists():
+            raise FileNotFoundError(f"Eintrag nicht gefunden: {section_id}/{name}")
+        path.unlink()
+        self.log_message("geloescht: %s/%s", section_id, path.name)
+        self.send_json({"file": path.name, "deleted": True})
+
     def guard(self, aktion) -> None:
         """Fuehrt eine Route aus und uebersetzt Fehler in JSON-Antworten."""
         try:
@@ -280,17 +363,24 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--content", type=Path, default=DEFAULT_CONTENT_DIR,
                         help="content-Ordner der Hugo-Seite")
+    parser.add_argument("--config", type=Path, default=None,
+                        help=f"{CONFIG_NAME} der Seite (Vorgabe: neben content/)")
     args = parser.parse_args()
 
     content_dir = args.content.resolve()
     if not content_dir.is_dir():
         raise SystemExit(f"content-Ordner nicht gefunden: {content_dir}")
 
+    config_path = (args.config or content_dir.parent / CONFIG_NAME).resolve()
+    CMSHandler.site_title, CMSHandler.sections = load_config(config_path)
     CMSHandler.content_dir = content_dir
+
     server = HTTPServer((args.host, args.port), CMSHandler)
     print(f"CMS laeuft auf http://{args.host}:{args.port}")
+    print(f"Seite:  {CMSHandler.site_title}")
+    print(f"Konfig: {config_path}")
     print(f"Inhalte: {content_dir}")
-    for eintrag in SECTIONS:
+    for eintrag in CMSHandler.sections:
         zeichen = "" if (content_dir / eintrag["dir"]).is_dir() else "  (Ordner fehlt!)"
         print(f"  {eintrag['name']} -> {eintrag['dir']}/{zeichen}")
     try:

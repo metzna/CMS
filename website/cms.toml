@@ -1,0 +1,44 @@
+# ---------------------------------------------------------------------------
+# CMS-Konfiguration dieser Seite.
+#
+# Liegt neben dem content-Ordner, also im Repo der Seite und nicht beim CMS:
+# jede Kundenseite bringt ihre eigene mit. Anderer Pfad: --config <datei>.
+#
+# Wird nur beim Start gelesen — nach einer Änderung den Server neu starten.
+# Ist etwas daran fehlerhaft, startet der Server nicht und nennt Stelle und
+# Grund. Das ist Absicht: lieber beim Hochfahren auffallen als beim Kunden.
+# ---------------------------------------------------------------------------
+
+
+# KANN. Steht im Browser-Tab der Oberfläche. Vorgabe: "CMS".
+# Bei mehreren offenen Kunden-Tabs ist das der einzige Unterschied.
+title = "Meine Seite"
+
+
+# MUSS: mindestens ein [[sections]]-Block. Jeder gibt einen Unterordner von
+# content/ zur Bearbeitung frei — was hier nicht steht, sieht der Kunde nicht.
+#
+# Die Reihenfolge hier ist die Reihenfolge im Auswahlmenü; vorausgewählt ist
+# beim Öffnen die erste Sektion, deren Ordner existiert.
+#
+#   dir    MUSS.  Unterordner in content/. Nur a-z, 0-9, - und _, kein
+#                 Schrägstrich. Der Ordner muss angelegt sein, sonst steht
+#                 die Sektion als "(Ordner fehlt)" da und ist nicht wählbar.
+#   name   KANN.  Beschriftung im Auswahlmenü. Vorgabe: dir.
+#   id     KANN.  Taucht in der URL auf (/api/sections/<id>/entries).
+#                 Vorgabe: dir. Gleiche Zeichen wie dir, und je Datei nur
+#                 einmal vergeben. Nur nötig, wenn die URL vom Ordnernamen
+#                 abweichen soll — etwa weil der Ordner später umzieht.
+#
+# Unabhängig von dem, was hier steht, nie bearbeitbar: die _index.md der
+# Sektionen (die Übersichtstexte) und alles ausserhalb der genannten Ordner.
+# Ein Eintrag ist immer eine .md-Datei direkt im Ordner; Hugos Page Bundles
+# (eigener Unterordner je Beitrag) tauchen in der Liste nicht auf.
+
+[[sections]]
+dir = "posts"
+name = "Blog"
+
+[[sections]]
+dir = "veranstaltungen"
+name = "Veranstaltungen"

@@ -60,6 +60,8 @@ button {
 button:hover { border-color: var(--accent); }
 button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
 button.primary:hover { filter: brightness(1.1); }
+button.danger { color: var(--warn); }
+button.danger:hover { border-color: var(--warn); }
 
 /* Seitenleiste */
 .sidebar {
@@ -173,8 +175,8 @@ button.primary:hover { filter: brightness(1.1); }
 }
 .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 
-.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.toolbar-right { display: flex; gap: 0.5rem; }
+.toolbar { display: flex; align-items: center; gap: 1rem; }
+.toolbar-right { display: flex; gap: 0.5rem; margin-left: auto; }
 .filename { color: var(--muted); font-size: 0.85rem; font-family: ui-monospace, monospace; }
 
 .panes { display: flex; flex: 1; gap: 1rem; min-height: 0; }
