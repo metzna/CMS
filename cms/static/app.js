@@ -13,6 +13,8 @@ const filenameEl = document.getElementById("filename");
 const previewBtn = document.getElementById("toggle-preview");
 const deleteBtn = document.getElementById("delete");
 const bauEl = document.getElementById("bau");
+const saveBtn = document.getElementById("save");
+const neuBtn = document.getElementById("new-post");
 const sectionEl = document.getElementById("section");
 const themeBtn = document.getElementById("theme");
 
@@ -158,6 +160,20 @@ function vorschauAktualisieren() {
   if (!previewEl.hidden) previewEl.innerHTML = renderMarkdown(bodyEl.value);
 }
 
+/* --- Sperre waehrend des Schreibens ----------------------------------- */
+
+// Speichern und Loeschen dauern so lange wie der Hugo-Build. In der Zeit
+// darf nichts zweites losgehen: ein Doppelklick auf einen neuen Eintrag
+// legte ihn sonst zweimal an (der Server haengt bei Namensgleichheit eine
+// Nummer an), und ein Sektionswechsel zoege dem Vorgang den Boden weg.
+let amArbeiten = false;
+
+function sperren(ja) {
+  amArbeiten = ja;
+  for (const el of [saveBtn, deleteBtn, neuBtn, sectionEl]) el.disabled = ja;
+  for (const btn of listEl.querySelectorAll("button")) btn.disabled = ja;
+}
+
 /* --- Baustand --------------------------------------------------------- */
 
 // "" | "laeuft" | "fertig" | "fehler". Der Haken verschwindet von allein,
@@ -262,6 +278,14 @@ function eintragBauen(post) {
   const meta = document.createElement("span");
   meta.className = "meta";
   meta.textContent = post.date || "ohne Datum";
+  if (post.fehler) {
+    // Datei liegt im Ordner, laesst sich aber nicht lesen.
+    const flag = document.createElement("span");
+    flag.className = "flag";
+    flag.textContent = " \u00b7 unlesbar";
+    flag.title = post.fehler;
+    meta.append(flag);
+  }
   if (post.draft) {
     const flag = document.createElement("span");
     flag.className = "flag";
@@ -269,6 +293,7 @@ function eintragBauen(post) {
     meta.append(flag);
   }
   btn.append(meta);
+  btn.disabled = amArbeiten;
   btn.addEventListener("click", () => beitragOeffnen(post.file));
   li.append(btn);
   return li;
@@ -321,6 +346,7 @@ function neuerBeitrag() {
 
 async function speichern(event) {
   event.preventDefault();
+  if (amArbeiten) return;   // Strg+S geht am gesperrten Knopf vorbei
   const daten = {
     title: titleEl.value,
     date: dateEl.value,
@@ -334,6 +360,7 @@ async function speichern(event) {
   };
   const pfad = entriesPfad(aktuell);
 
+  sperren(true);
   bauStand("laeuft");
   try {
     const post = await api(pfad, optionen);
@@ -347,16 +374,19 @@ async function speichern(event) {
   } catch (fehler) {
     bauStand("");
     melde(fehler.message, true);
+  } finally {
+    sperren(false);   // auch nach einem Fehler wieder bedienbar
   }
 }
 
 async function loeschen() {
-  if (!aktuell) return;
+  if (!aktuell || amArbeiten) return;
   const datei = aktuell;
   const frage = `\u201e${titleEl.value.trim() || datei}\u201c l\u00f6schen?\n\n`
     + `Die Datei ${datei} wird entfernt \u2014 hier gibt es kein Zur\u00fcck.`;
   if (!confirm(frage)) return;
 
+  sperren(true);
   bauStand("laeuft");
   try {
     const antwort = await api(entriesPfad(datei), { method: "DELETE" });
@@ -371,6 +401,9 @@ async function loeschen() {
   } catch (fehler) {
     bauStand("");
     melde(fehler.message, true);
+  } finally {
+    sperren(false);
+    deleteBtn.hidden = !aktuell;   // nach dem Loeschen gibt es nichts mehr
   }
 }
 
@@ -393,7 +426,7 @@ themeBtn.addEventListener("click", () => {
 
 deleteBtn.addEventListener("click", loeschen);
 sectionEl.addEventListener("change", sektionWechseln);
-document.getElementById("new-post").addEventListener("click", neuerBeitrag);
+neuBtn.addEventListener("click", neuerBeitrag);
 formEl.addEventListener("submit", speichern);
 bodyEl.addEventListener("input", vorschauAktualisieren);
 

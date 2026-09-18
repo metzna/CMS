@@ -102,9 +102,10 @@ def cookie_pruefen(wert: str, host: str, schluessel: bytes) -> str | None:
 
     try:
         benutzer, cookie_host, ablauf = inhalt.decode("utf-8").split("|")
+        verfaellt = int(ablauf)
     except (UnicodeDecodeError, ValueError):
         return None
-    if cookie_host != host or int(ablauf) < time.time():
+    if cookie_host != host or verfaellt < time.time():
         return None
     return benutzer
 

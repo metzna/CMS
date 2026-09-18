@@ -30,6 +30,11 @@ diese Seite dauert das rund 60 ms, darum passiert es synchron: die Antwort
 sagt schon, ob es geklappt hat, und die Oberflaeche zeigt es neben
 „Speichern“ als Ring und danach als Haken.
 
+Waehrend Speichern oder Loeschen laeuft, sind die Knoepfe gesperrt — auch
+`Strg+S`, das sonst am Knopf vorbeiginge. Ohne das legte ein Doppelklick auf
+einen neuen Eintrag ihn zweimal an, weil der Server bei Namensgleichheit eine
+Nummer anhaengt.
+
 Scheitert der Build, ist der Text trotzdem gespeichert. Die Statuszeile sagt
 dann, dass die Seite nicht neu erzeugt wurde, und nennt Hugos Meldung; die
 volle Ausgabe steht im Protokoll des Servers.

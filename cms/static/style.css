@@ -58,6 +58,8 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--accent); }
+button:disabled, select:disabled { opacity: 0.5; cursor: default; }
+button:disabled:hover { border-color: var(--line); }
 button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
 button.primary:hover { filter: brightness(1.1); }
 button.danger { color: var(--warn); }

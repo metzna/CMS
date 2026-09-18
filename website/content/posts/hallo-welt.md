@@ -10,4 +10,4 @@ hugo new content posts/mein-beitrag.md
 ```
 
 Danach `draft: true` im Frontmatter entfernen, sonst taucht der Beitrag
-im gebauten Site nicht auf.
+im gebauten Site nicht auf.sdrtzbsrbz

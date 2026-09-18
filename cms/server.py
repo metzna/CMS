@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import tomllib
+import traceback
 import unicodedata
 from datetime import date
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -183,7 +184,15 @@ def hugo_bauen(site_dir: Path, hugo: str) -> dict:
 
 
 def read_entry(path: Path) -> dict:
-    raw = path.read_text(encoding="utf-8")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        # Kommt vor, wenn eine Datei am CMS vorbei angelegt wurde, etwa aus
+        # einem alten Editor in Latin-1.
+        raise PostError(
+            f"{path.name} ist nicht in UTF-8 gespeichert und laesst sich "
+            f"nicht lesen."
+        ) from exc
     fields, _extra, body = parse_front_matter(raw)
     return {
         "file": path.name,
@@ -358,8 +367,15 @@ class CMSHandler(SimpleHTTPRequestHandler):
     def list_entries(self, section_id: str) -> list[dict]:
         eintraege = []
         for path in self.entry_paths(section_id):
-            eintrag = read_entry(path)
-            eintrag.pop("body")
+            try:
+                eintrag = read_entry(path)
+                eintrag.pop("body")
+            except PostError as exc:
+                # Eine unlesbare Datei darf nicht die ganze Sektion lahmlegen:
+                # der Rest bleibt bedienbar, diese eine wird markiert.
+                self.log_message("unlesbar: %s (%s)", path.name, exc)
+                eintrag = {"file": path.name, "title": path.name, "date": "",
+                           "draft": False, "fehler": str(exc)}
             eintraege.append(eintrag)
         eintraege.sort(key=lambda e: (e["date"], e["file"]), reverse=True)
         return eintraege
@@ -406,6 +422,12 @@ class CMSHandler(SimpleHTTPRequestHandler):
             self.send_json({"error": str(exc)}, 404)
         except OSError as exc:
             self.send_json({"error": f"Dateifehler: {exc}"}, 500)
+        except Exception:
+            # Letztes Netz: ohne das bricht die Verbindung ohne Antwort ab,
+            # und die Oberflaeche zeigt nur "Failed to fetch".
+            self.log_error("Unerwarteter Fehler:\n%s", traceback.format_exc())
+            self.send_json({"error": "Unerwarteter Fehler im Server. "
+                                     "Einzelheiten stehen im Protokoll."}, 500)
 
 
 def main() -> None:
