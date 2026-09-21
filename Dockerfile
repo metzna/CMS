@@ -31,9 +31,10 @@ RUN set -eux; \
 FROM python:3.13-slim
 
 # Hugo extended ist gegen libstdc++ gelinkt; das slim-Image bringt es nicht mit.
+# git fuer --git, openssh-client fuer --push ueber einen Deploy-Key.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends libstdc++6; \
+    apt-get install -y --no-install-recommends libstdc++6 git openssh-client; \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=hugo /usr/local/bin/hugo /usr/local/bin/hugo

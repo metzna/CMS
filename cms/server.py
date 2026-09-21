@@ -211,6 +211,8 @@ def git_repo(start: Path) -> Path | None:
     """Wurzel des Repos, in dem die Inhalte liegen -- oder None."""
     try:
         lauf = git_lauf(start, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT)
+    except FileNotFoundError:
+        raise SystemExit("--git ist gesetzt, aber git ist nicht installiert.")
     except (OSError, subprocess.SubprocessError):
         return None
     return Path(lauf.stdout.strip()) if lauf.returncode == 0 else None
@@ -364,6 +366,12 @@ class CMSHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_json(self) -> dict:
+        # Ein fremdes <form> kann nur text/plain und Formulardaten schicken.
+        # application/json erzwingt beim Browser eine Rueckfrage (CORS), die
+        # dieser Server nie beantwortet -- so kommt nichts Fremdes durch.
+        art = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if art != "application/json":
+            raise PostError("Anfrage muss application/json sein.")
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             raise PostError("Leere Anfrage.")

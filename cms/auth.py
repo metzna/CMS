@@ -211,8 +211,14 @@ button:hover {{ filter:brightness(1.1); }}
 
 
 def sicheres_ziel(ziel: str) -> str:
-    """Nur seiteneigene Pfade -- sonst wird der Login zur Weiterleitung fuer Fremde."""
-    if ziel.startswith("/") and not ziel.startswith("//"):
+    """Nur seiteneigene Pfade -- sonst wird der Login zur Weiterleitung fuer Fremde.
+
+    Kein "//" (fremder Host), kein Backslash (Browser machen aus "/\\x" ein
+    "//x") und nur sichtbare ASCII-Zeichen: ein Zeilenumbruch im Ziel wuerde
+    sonst eigene Header in die Antwort schreiben.
+    """
+    if (ziel.startswith("/") and not ziel.startswith("//") and "\\" not in ziel
+            and all(0x20 < ord(zeichen) < 0x7f for zeichen in ziel)):
         return ziel
     return "/"
 
@@ -242,6 +248,9 @@ class AuthHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(koerper)))
         self.send_header("Cache-Control", "no-store")
         for name, wert in kopf.items():
+            # Zweite Sicherung: ein Zeilenumbruch haette hier nichts verloren.
+            if "\r" in wert or "\n" in wert:
+                raise ValueError(f"Zeilenumbruch im Header {name}")
             self.send_header(name.replace("_", "-"), wert)
         self.end_headers()
         if koerper:

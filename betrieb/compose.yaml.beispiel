@@ -11,6 +11,10 @@ services:
   cms:
     image: cms:0.131.0
     restart: unless-stopped
+    # Das Programm braucht keine Sonderrechte: alle abgeben, und nie neue
+    # dazubekommen, auch nicht ueber setuid-Programme im Image.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     # --git haelt jede Aenderung als Commit fest, --push sichert sie ausser
     # Haus. Fuer --push braucht der Container einen Deploy-Key: dann hier
     # zusaetzlich ~/.ssh als read-only Volume und den remote im Klon setzen.
@@ -37,6 +41,10 @@ services:
   auth:
     image: cms:0.131.0
     restart: unless-stopped
+    # Das Programm braucht keine Sonderrechte: alle abgeben, und nie neue
+    # dazubekommen, auch nicht ueber setuid-Programme im Image.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     command: ["python3", "-u", "/opt/cms/auth.py",
               "--host", "0.0.0.0", "--port", "9000",
               "--config", "/auth/auth.toml"]
