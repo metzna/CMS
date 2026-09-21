@@ -1,0 +1,54 @@
+# Eine Website. Diese Datei gehoert neben den Ordner des Kunden, also z. B.
+# nach /srv/kunden/kunde-a/compose.yaml -- dort dann "docker compose up -d".
+#
+# Zwei Dienste aus demselben Image: das CMS und die Anmeldung davor. Getrennt,
+# weil ein Container ein Programm betreuen soll; das Image ist fuer beide das
+# gleiche, es kostet also keinen zusaetzlichen Platz.
+
+name: kunde-a
+
+services:
+  cms:
+    image: cms:0.131.0
+    restart: unless-stopped
+    # --git haelt jede Aenderung als Commit fest, --push sichert sie ausser
+    # Haus. Fuer --push braucht der Container einen Deploy-Key: dann hier
+    # zusaetzlich ~/.ssh als read-only Volume und den remote im Klon setzen.
+    command: ["python3", "-u", "/opt/cms/server.py",
+              "--host", "0.0.0.0", "--port", "8080",
+              "--content", "/site/website/content",
+              "--git", "--git-name", "CMS", "--git-email", "cms@kunde-a.de"]
+    # WICHTIG: 127.0.0.1 davor. Ohne das traegt Docker den Port an der
+    # Firewall vorbei nach aussen -- der Port waere offen im Internet,
+    # auch bei aktivem ufw.
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      # Die Inhalte leben auf dem Host. Der Container ist Wegwerfware,
+      # dieser Ordner nicht: hierhin git, hierhin das Backup.
+      - ./site:/site
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/site').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  auth:
+    image: cms:0.131.0
+    restart: unless-stopped
+    command: ["python3", "-u", "/opt/cms/auth.py",
+              "--host", "0.0.0.0", "--port", "9000",
+              "--config", "/auth/auth.toml"]
+    ports:
+      - "127.0.0.1:9001:9000"
+    volumes:
+      # Enthaelt auth.toml und den beim ersten Start erzeugten auth.key.
+      # Muss beschreibbar sein, sonst kann der Schluessel nicht entstehen.
+      - ./auth:/auth
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import socket; socket.create_connection(('127.0.0.1', 9000), 2).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

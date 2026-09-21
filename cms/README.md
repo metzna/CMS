@@ -24,6 +24,14 @@ python3 cms/server.py --port 8081 --content /srv/kunde-b/website/content
 
 ## Erzeugen der Seite
 
+Mehrere Anfragen werden nebenlaeufig bedient. Schreiben, Bauen und
+Committen laufen dabei unter einer gemeinsamen Sperre: zwei Hugo-Laeufe
+raeumten einander sonst `public/` weg, zwei `git commit` stritten um
+`index.lock`, und zwei gleichzeitig angelegte Beitraege koennten denselben
+Dateinamen bekommen. Lesende Anfragen laufen frei weiter, auch waehrend
+gebaut wird. Geschrieben wird ueber eine Zwischendatei und `os.replace`,
+damit ein Leser nie eine halb geschriebene Datei erwischt.
+
 Nach jedem Speichern und Loeschen laeuft `hugo` im Ordner ueber `content/`
 und schreibt `public/` neu — die Aenderung ist also sofort auf der Seite. Fuer
 diese Seite dauert das rund 60 ms, darum passiert es synchron: die Antwort
@@ -42,7 +50,50 @@ volle Ausgabe steht im Protokoll des Servers.
 Gebaut wird mit `--cleanDestinationDir`, damit ein geloeschter Beitrag auch
 aus `public/` verschwindet und nicht fuer Besucher erreichbar bleibt.
 
-Wer beim Entwickeln ohnehin `hugo server` laufen laesst, schaltet den Build
+### Zeitzone: unbedingt setzen
+
+In `hugo.toml` der Seite muss `timeZone` stehen, z. B.:
+
+```toml
+timeZone = 'Europe/Berlin'
+```
+
+Ohne das liest Hugo ein `date: 2026-09-19` als **UTC**-Mitternacht. Zwischen
+00:00 und 02:00 mitteleuropaeischer Sommerzeit liegt die noch in der
+Zukunft, und Hugo laesst den Beitrag als terminiert aus dem Build heraus --
+ohne Fehler, mit Exit-Code 0. Das CMS meldet dann "gespeichert und erzeugt",
+und der Beitrag steht trotzdem nicht auf der Seite. Nachts geschriebene
+Beitraege erscheinen so erst Stunden spaeter.
+
+## Versionsgeschichte und Sicherung
+
+Mit `--git` wird jede Aenderung als Commit festgehalten — angelegt,
+bearbeitet, geloescht, jeweils mit dem Titel in der Nachricht. Damit ist
+alles umkehrbar, auch das Loeschen, das sonst keinen Papierkorb hat. Das
+Repo wird ueber `git rev-parse --show-toplevel` gefunden, muss also nur
+irgendwo oberhalb der Inhalte liegen. Name und E-Mail im Commit setzen
+`--git-name` und `--git-email`; das Repo braucht dafuer keine eigene
+Konfiguration.
+
+`--push` schiebt zusaetzlich nach aussen, etwa in ein privates Repo als
+Sicherung. Das laeuft **nebenher**, nicht im Request: ein Push ins Netz kann
+Sekunden dauern oder haengen, und so lange darf ein Kunde nicht warten.
+Scheitert er, steht die Meldung in der naechsten Antwort — spaetestens beim
+naechsten Speichern sieht der Kunde also, dass die Sicherung klemmt. Geht er
+wieder durch, verschwindet die Klage von selbst.
+
+Die drei Schritte sind getrennt zu betrachten: **gespeichert ist immer**,
+auch wenn der Build scheitert; **versioniert ist meistens**, auch wenn der
+Push scheitert. Die Statuszeile nennt genau die Stufe, die nicht geklappt
+hat.
+
+```bash
+python3 cms/server.py --git --push --git-name "CMS" --git-email "cms@kunde-a.de"
+```
+
+## Beim Entwickeln
+
+Wer ohnehin `hugo server` laufen laesst, schaltet den Build
 mit `--kein-build` ab:
 
 ```bash

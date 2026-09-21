@@ -2,6 +2,12 @@ baseURL = 'https://example.org/'
 languageCode = 'de-de'
 title = 'Meine Seite'
 
+# Ohne das liest Hugo "date: 2026-09-19" als UTC-Mitternacht. Zwischen 00:00
+# und 02:00 unserer Zeit liegt die noch in der Zukunft -- Hugo haelt den
+# Beitrag dann fuer terminiert und laesst ihn aus dem Build heraus, ohne zu
+# klagen. Ein nachts geschriebener Beitrag erschiene erst Stunden spaeter.
+timeZone = 'Europe/Berlin'
+
 [params]
   description = 'Eine kleine Hugo-Seite.'
 

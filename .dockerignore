@@ -1,0 +1,11 @@
+# Alles, was nicht ins Image gehoert. Ohne das wandert der halbe Ordner in
+# den Build-Kontext -- inklusive der gebauten Seite und der Git-Historie.
+.git
+.gitignore
+website/
+betrieb/
+**/__pycache__
+**/*.pyc
+**/auth.key
+Dockerfile
+.dockerignore

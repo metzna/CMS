@@ -10,14 +10,16 @@ Start:  python3 cms/server.py
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
+import threading
 import tomllib
 import traceback
 import unicodedata
 from datetime import date
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -30,6 +32,11 @@ CONFIG_NAME = "cms.toml"
 # Nach jedem Schreiben laeuft Hugo. Fuer diese Seite dauert das ~60 ms, darum
 # synchron: die Antwort sagt dann schon, ob die Seite wirklich neu steht.
 BUILD_TIMEOUT = 60
+
+# Commit laeuft im Request und ist rein lokal. Der Push geht ins Netz und
+# laeuft deshalb nebenher -- er darf das Speichern des Kunden nie aufhalten.
+GIT_TIMEOUT = 15
+PUSH_TIMEOUT = 120
 
 # Nur einfache Dateinamen, kein Pfadwechsel, kein Listenindex des Abschnitts.
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\.md$")
@@ -183,6 +190,94 @@ def hugo_bauen(site_dir: Path, hugo: str) -> dict:
     return {"ok": False, "meldung": meldung, "ausgabe": ausgabe.strip()}
 
 
+def git_lauf(repo: Path, args: list[str], timeout: int) -> subprocess.CompletedProcess:
+    # LC_ALL=C: sonst antwortet git in der Sprache des Servers, und Meldungen
+    # zu lesen wird zum Ratespiel.
+    return subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, timeout=timeout,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+
+
+def erste_zeile(lauf: subprocess.CompletedProcess, ersatz: str) -> str:
+    """Die erste Zeile nennt den Grund; die letzte ist meist nur ein Nachsatz."""
+    for zeile in f"{lauf.stderr}\n{lauf.stdout}".splitlines():
+        if zeile.strip():
+            return zeile.strip()
+    return ersatz
+
+
+def git_repo(start: Path) -> Path | None:
+    """Wurzel des Repos, in dem die Inhalte liegen -- oder None."""
+    try:
+        lauf = git_lauf(start, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return Path(lauf.stdout.strip()) if lauf.returncode == 0 else None
+
+
+def git_commit(repo: Path, pfade: list[Path], nachricht: str,
+               name: str, email: str) -> dict:
+    """Legt einen Commit an. Identitaet kommt mit, damit das Repo keine braucht."""
+    try:
+        git_lauf(repo, ["add", "--", *(str(p) for p in pfade)], GIT_TIMEOUT)
+        # Nichts vorgemerkt heisst: der Text war unveraendert. Das ueber den
+        # Rueckgabewert pruefen statt ueber den Meldungstext -- der haengt
+        # von der Sprache ab.
+        steht_an = git_lauf(repo, ["diff", "--cached", "--quiet", "--",
+                                   *(str(p) for p in pfade)], GIT_TIMEOUT)
+        if steht_an.returncode == 0:
+            return {"ok": True, "meldung": ""}
+        lauf = git_lauf(repo, [
+            "-c", f"user.name={name}", "-c", f"user.email={email}",
+            "commit", "-m", nachricht, "--", *(str(p) for p in pfade),
+        ], GIT_TIMEOUT)
+    except FileNotFoundError:
+        return {"ok": False, "meldung": "git nicht gefunden."}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "meldung": f"git antwortet seit {GIT_TIMEOUT} s nicht."}
+    except OSError as exc:
+        return {"ok": False, "meldung": f"git liess sich nicht starten: {exc}"}
+
+    if lauf.returncode == 0:
+        return {"ok": True, "meldung": ""}
+    return {"ok": False, "meldung": erste_zeile(
+        lauf, f"git commit endete mit Code {lauf.returncode}.")}
+
+
+def git_push(repo: Path) -> dict:
+    try:
+        lauf = git_lauf(repo, ["push"], PUSH_TIMEOUT)
+    except FileNotFoundError:
+        return {"ok": False, "meldung": "git nicht gefunden."}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "meldung": f"Push seit {PUSH_TIMEOUT} s ohne Antwort."}
+    except OSError as exc:
+        return {"ok": False, "meldung": f"Push liess sich nicht starten: {exc}"}
+    if lauf.returncode == 0:
+        return {"ok": True, "meldung": ""}
+    return {"ok": False, "meldung": erste_zeile(lauf, "Push fehlgeschlagen.")}
+
+
+def schreibe_atomar(path: Path, text: str) -> None:
+    """Erst daneben schreiben, dann umhaengen.
+
+    os.replace ist auf einem Dateisystem unteilbar. Ohne das koennte ein
+    gleichzeitiger Leser -- das Laden der Liste etwa -- eine halb
+    geschriebene Datei erwischen.
+
+    Der Zwischenname beginnt mit einem Punkt und endet nicht auf .md, faellt
+    also weder durch glob("*.md") noch Hugo auf.
+    """
+    zwischen = path.with_name(f".{path.name}.tmp")
+    try:
+        zwischen.write_text(text, encoding="utf-8")
+        os.replace(zwischen, path)
+    except BaseException:
+        zwischen.unlink(missing_ok=True)
+        raise
+
+
 def read_entry(path: Path) -> dict:
     try:
         raw = path.read_text(encoding="utf-8")
@@ -237,6 +332,24 @@ class CMSHandler(SimpleHTTPRequestHandler):
     site_title: str = "CMS"
     site_dir: Path = DEFAULT_CONTENT_DIR.parent   # hier liegt hugo.toml
     hugo: str | None = None                       # None = nicht bauen
+    repo: Path | None = None                      # None = nicht versionieren
+    git_name: str = "CMS"
+    git_email: str = "cms@localhost"
+    push: bool = False
+    # Der Push laeuft nebenher; sein Ergebnis kommt mit der naechsten Antwort
+    # mit, damit eine klemmende Sicherung nicht unbemerkt bleibt.
+    letzter_push: dict | None = None
+    push_sperre = threading.Lock()
+
+    # Schreiben, Bauen und Committen vertragen sich nicht nebenlaeufig:
+    # zwei Hugo-Laeufe raeumen einander public/ weg, zwei git-Commits
+    # streiten um index.lock, und free_path() koennte zweimal denselben
+    # Dateinamen vergeben. Lesende Anfragen laufen weiter frei.
+    schreib_sperre = threading.Lock()
+    # Laeuft schon ein Push, wird kein zweiter gestartet -- der laufende
+    # holt die neuen Commits in einer weiteren Runde mit.
+    push_lauf = threading.Lock()
+    push_nochmal = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -295,6 +408,42 @@ class CMSHandler(SimpleHTTPRequestHandler):
             self.log_message("Build fehlgeschlagen: %s", ergebnis.get("ausgabe", ""))
         ergebnis.pop("ausgabe", None)
         return ergebnis
+
+    def sichern(self, nachricht: str, pfade: list[Path]) -> dict | None:
+        """Commit sofort, Push nebenher. Gibt None zurueck, wenn abgeschaltet."""
+        if self.repo is None:
+            return None
+
+        ergebnis = git_commit(self.repo, pfade, nachricht,
+                              self.git_name, self.git_email)
+        if not ergebnis["ok"]:
+            self.log_error("Commit fehlgeschlagen: %s", ergebnis["meldung"])
+        elif self.push:
+            threading.Thread(target=self.push_nebenher, daemon=True).start()
+
+        # Was der letzte Push gemeldet hat, faehrt hier mit.
+        with CMSHandler.push_sperre:
+            if CMSHandler.letzter_push is not None:
+                ergebnis["push"] = CMSHandler.letzter_push
+        return ergebnis
+
+    def push_nebenher(self) -> None:
+        if not CMSHandler.push_lauf.acquire(blocking=False):
+            CMSHandler.push_nochmal = True   # laeuft schon, der nimmt es mit
+            return
+        try:
+            while True:
+                CMSHandler.push_nochmal = False
+                ergebnis = git_push(self.repo)
+                if not ergebnis["ok"]:
+                    self.log_error("Push fehlgeschlagen: %s", ergebnis["meldung"])
+                with CMSHandler.push_sperre:
+                    # Ein gelungener Push loescht die alte Klage wieder.
+                    CMSHandler.letzter_push = None if ergebnis["ok"] else ergebnis
+                if not CMSHandler.push_nochmal:
+                    return
+        finally:
+            CMSHandler.push_lauf.release()
 
     def free_path(self, section_id: str, slug: str) -> Path:
         candidate = self.entry_path(section_id, f"{slug}.md")
@@ -388,29 +537,53 @@ class CMSHandler(SimpleHTTPRequestHandler):
 
     def create_entry(self, section_id: str) -> None:
         title, datum, draft, body = payload_to_values(self.read_json())
+        with CMSHandler.schreib_sperre:
+            self.create_entry_gesperrt(section_id, title, datum, draft, body)
+
+    def create_entry_gesperrt(self, section_id: str, title: str, datum: str,
+                              draft: bool, body: str) -> None:
         path = self.free_path(section_id, slugify(title))
-        path.write_text(build_front_matter(title, datum, draft, [], body), encoding="utf-8")
+        schreibe_atomar(path, build_front_matter(title, datum, draft, [], body))
         self.log_message("angelegt: %s/%s", section_id, path.name)
-        self.send_json({**read_entry(path), "build": self.bauen()}, 201)
+        antwort = read_entry(path)
+        antwort["build"] = self.bauen()
+        antwort["git"] = self.sichern(f'"{title}" angelegt', [path])
+        self.send_json(antwort, 201)
 
     def update_entry(self, section_id: str, name: str) -> None:
+        title, datum, draft, body = payload_to_values(self.read_json())
+        with CMSHandler.schreib_sperre:
+            self.update_entry_gesperrt(section_id, name, title, datum, draft, body)
+
+    def update_entry_gesperrt(self, section_id: str, name: str, title: str,
+                              datum: str, draft: bool, body: str) -> None:
         path = self.entry_path(section_id, name)
         if not path.exists():
             raise FileNotFoundError(f"Eintrag nicht gefunden: {section_id}/{name}")
-        title, datum, draft, body = payload_to_values(self.read_json())
         _fields, extra, _body = parse_front_matter(path.read_text(encoding="utf-8"))
-        path.write_text(build_front_matter(title, datum, draft, extra, body), encoding="utf-8")
+        schreibe_atomar(path, build_front_matter(title, datum, draft, extra, body))
         self.log_message("gespeichert: %s/%s", section_id, path.name)
-        self.send_json({**read_entry(path), "build": self.bauen()})
+        antwort = read_entry(path)
+        antwort["build"] = self.bauen()
+        antwort["git"] = self.sichern(f'"{title}" bearbeitet', [path])
+        self.send_json(antwort)
 
     def delete_entry(self, section_id: str, name: str) -> None:
+        with CMSHandler.schreib_sperre:
+            self.delete_entry_gesperrt(section_id, name)
+
+    def delete_entry_gesperrt(self, section_id: str, name: str) -> None:
         # entry_path haelt _index.md und Pfade ausserhalb der Sektion fern.
         path = self.entry_path(section_id, name)
         if not path.exists():
             raise FileNotFoundError(f"Eintrag nicht gefunden: {section_id}/{name}")
         path.unlink()
         self.log_message("geloescht: %s/%s", section_id, path.name)
-        self.send_json({"file": path.name, "deleted": True, "build": self.bauen()})
+        self.send_json({
+            "file": path.name, "deleted": True,
+            "build": self.bauen(),
+            "git": self.sichern(f"{path.name} geloescht", [path]),
+        })
 
     def guard(self, aktion) -> None:
         """Fuehrt eine Route aus und uebersetzt Fehler in JSON-Antworten."""
@@ -443,6 +616,15 @@ def main() -> None:
     parser.add_argument("--kein-build", action="store_true",
                         help="nach dem Speichern nicht bauen (z. B. wenn "
                              "'hugo server' schon laeuft)")
+    parser.add_argument("--git", action="store_true",
+                        help="jede Aenderung als Commit festhalten")
+    parser.add_argument("--push", action="store_true",
+                        help="nach dem Commit nebenher pushen (braucht --git "
+                             "und einen eingerichteten remote)")
+    parser.add_argument("--git-name", default="CMS",
+                        help="Name im Commit (Vorgabe: CMS)")
+    parser.add_argument("--git-email", default="cms@localhost",
+                        help="E-Mail im Commit (Vorgabe: cms@localhost)")
     args = parser.parse_args()
 
     content_dir = args.content.resolve()
@@ -466,12 +648,32 @@ def main() -> None:
             )
         CMSHandler.hugo = gefunden
 
-    server = HTTPServer((args.host, args.port), CMSHandler)
+    if args.push and not args.git:
+        raise SystemExit("--push braucht --git.")
+    if args.git:
+        repo = git_repo(content_dir)
+        if repo is None:
+            raise SystemExit(
+                f"Kein Git-Repo ueber {content_dir}.\n"
+                f"  Mit 'git init' eines anlegen oder --git weglassen."
+            )
+        CMSHandler.repo = repo
+        CMSHandler.git_name = args.git_name
+        CMSHandler.git_email = args.git_email
+        CMSHandler.push = args.push
+
+    server = ThreadingHTTPServer((args.host, args.port), CMSHandler)
+    server.daemon_threads = True   # beim Beenden nicht auf offene Verbindungen warten
     print(f"CMS laeuft auf http://{args.host}:{args.port}")
     print(f"Seite:  {CMSHandler.site_title}")
     print(f"Konfig: {config_path}")
     print(f"Inhalte: {content_dir}")
     print(f"Build:  {CMSHandler.hugo or 'aus (--kein-build)'}")
+    if CMSHandler.repo is None:
+        print("Git:    aus")
+    else:
+        print(f"Git:    {CMSHandler.repo}"
+              f"{'  (mit Push)' if CMSHandler.push else '  (nur lokal)'}")
     for eintrag in CMSHandler.sections:
         zeichen = "" if (content_dir / eintrag["dir"]).is_dir() else "  (Ordner fehlt!)"
         print(f"  {eintrag['name']} -> {eintrag['dir']}/{zeichen}")

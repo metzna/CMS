@@ -188,12 +188,25 @@ function bauStand(zustand) {
   }
 }
 
-// Antworten der schreibenden Routen tragen ein build-Feld. Gibt zurueck,
-// ob die Seite neu erzeugt wurde -- geschrieben wurde sie in jedem Fall.
+// Antworten der schreibenden Routen tragen build und git. Geschrieben ist
+// der Text in jedem Fall -- alles Weitere kann einzeln schiefgehen, in
+// dieser Reihenfolge der Dringlichkeit. Gibt zurueck, ob alles glatt lief.
 function bauMelden(antwort, erfolgstext, vorspann) {
   const bau = antwort.build;
+  const git = antwort.git;
+
   if (bau && !bau.ok) {
     melde(`${vorspann}, aber die Seite wurde nicht neu erzeugt: ${bau.meldung}`, true);
+    return false;
+  }
+  if (git && !git.ok) {
+    melde(`${vorspann}, aber nicht in die Versionsgeschichte aufgenommen: `
+          + git.meldung, true);
+    return false;
+  }
+  if (git && git.push && !git.push.ok) {
+    // Der Text ist hier und versioniert, nur die Sicherung ausser Haus klemmt.
+    melde(`${erfolgstext} \u2014 die Sicherung klemmt: ${git.push.meldung}`, true);
     return false;
   }
   melde(erfolgstext);

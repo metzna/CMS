@@ -31,7 +31,55 @@ Ein Cookie von Seite A ist auf Seite B aus drei Gruenden wertlos:
    den einen, zu dem er gehoert. Alles andere beantwortet er mit 404.
 3. **Der Schluessel.** Jede Seite signiert mit einem eigenen `auth.key`.
 
-## Einrichten
+## Mit Docker
+
+Im Wurzelverzeichnis liegen `Dockerfile` und `.dockerignore`, hier daneben
+`compose.yaml.beispiel`. Ein Image fuer alle Kunden, je Kunde zwei Container
+(CMS und Anmeldung) aus demselben Image.
+
+```bash
+docker build -t cms:0.131.0 .          # einmal, im Wurzelverzeichnis
+
+mkdir -p /srv/kunden/kunde-a/{site,auth}
+git clone <repo-oder-leer> /srv/kunden/kunde-a/site
+cp betrieb/compose.yaml.beispiel /srv/kunden/kunde-a/compose.yaml
+cp betrieb/auth.toml.beispiel    /srv/kunden/kunde-a/auth/auth.toml
+
+python3 cms/auth.py --passwort         # Hash erzeugen, in auth.toml eintragen
+$EDITOR /srv/kunden/kunde-a/auth/auth.toml
+
+chown -R 1000:1000 /srv/kunden/kunde-a # siehe unten
+cd /srv/kunden/kunde-a && docker compose up -d
+```
+
+Danach den Caddy-Block aus `Caddyfile.beispiel` eintragen; die Ports darin
+(8081 und 9001) sind dieselben wie in der `compose.yaml`.
+
+### Drei Dinge, die hier schiefgehen
+
+**Die Inhalte gehoeren auf den Host, nicht in den Container.** In der
+`compose.yaml` macht das `./site:/site`. Ohne diesen Mount waere alles, was
+der Kunde geschrieben hat, beim naechsten `docker compose up` weg.
+
+**Die UID muss passen.** Im Image laeuft alles als Benutzer mit UID 1000.
+Gehoert `/srv/kunden/kunde-a/` auf dem Host jemand anderem, kann das CMS
+nicht schreiben und meldet beim Speichern einen Dateifehler. Entweder den
+Ordner auf 1000 setzen (wie oben) oder das Image mit
+`--build-arg CMS_UID=…` bauen.
+
+**Docker geht an der Firewall vorbei.** Ein `ports: "8081:8080"` ohne
+vorangestelltes `127.0.0.1` oeffnet den Port im Internet, auch bei aktivem
+`ufw`. In der Vorlage steht es richtig -- beim Abschreiben nicht kuerzen.
+
+### Warum die Hugo-Version im Image festgenagelt ist
+
+Das `Dockerfile` laedt eine bestimmte Hugo-Version und prueft deren
+SHA256-Summe. Damit kann ein Hugo-Update die Seite eines Kunden nicht mehr
+still veraendern -- erst wenn du das Image neu baust, und dann fuer alle
+gleichzeitig und nachvollziehbar. Neue Version: `HUGO_VERSION` und
+`HUGO_SHA256` aus `hugo_<version>_checksums.txt` des Releases setzen.
+
+## Einrichten ohne Docker
 
 ```bash
 # 1. Ordner und Systembenutzer
@@ -54,7 +102,8 @@ systemctl enable --now cms@kunde-a cms-auth@kunde-a
 systemctl reload caddy
 ```
 
-Ports je Website hochzaehlen: 8081/9001, 8082/9002, und so fort.
+Ports je Website hochzaehlen: 8081/9001, 8082/9002, und so fort. Das gilt
+fuer beide Wege, mit und ohne Docker.
 
 ## Ausprobieren ohne VPS
 
