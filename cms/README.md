@@ -15,7 +15,7 @@ den Bild-Upload (`pip install Pillow`). Ohne Pillow laeuft alles Uebrige, nur
 Bilder lassen sich dann nicht hochladen. Sonst reicht die
 Python-Standardbibliothek.
 Optionen: `--port`, `--host`, `--content <ordner>`, `--config <datei>`,
-`--hugo <programm>`, `--no-build`.
+`--hugo <programm>`, `--no-build`, `--allowed-host <name>`.
 
 Ein Prozess bedient genau eine Seite. Fuer eine zweite Seite einen zweiten
 Prozess starten:
@@ -197,6 +197,13 @@ Fehlt der Ordner, erscheint die Sektion in der Auswahl als
 - Keine Anmeldung im Server selbst. Er bindet auf `127.0.0.1` und gehört
   nicht ins offene Netz. Für den Betrieb mit Kundenzugängen steht die
   Anmeldung davor: siehe `betrieb/README.md` und `cms/auth.py`.
+- Der Server antwortet nur, wenn im `Host`-Header `localhost`, `127.0.0.1`
+  oder `[::1]` steht, sonst mit 403. Das schuetzt vor DNS-Rebinding: Eine
+  fremde Seite, die ihren Namen auf `127.0.0.1` umbiegt, kaeme sonst ueber
+  den Browser ans CMS. Wer es unter einem anderen Namen oder einer
+  LAN-Adresse aufruft, gibt ihn mit `--allowed-host` an (mehrfach moeglich).
+  Hinter Caddy setzt `header_up Host` den Header passend, siehe
+  `betrieb/Caddyfile.beispiel`.
 - Im Titel sind `"` und `\` nicht erlaubt; der Titel steht im Frontmatter als
   `title: "..."`, wo `"` den Wert abbricht und `\` eine Escape-Sequenz
   beginnt — beides macht die Datei fuer Hugo unlesbar. Das Eingabefeld meldet

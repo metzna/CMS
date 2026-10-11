@@ -381,6 +381,14 @@ python3 cms/server.py            # dann http://127.0.0.1:8080 öffnen
 Läuft nebenher schon `hugo server` zum Vorschauen, dann mit
 `--no-build` starten, damit nicht zwei Programme gleichzeitig bauen.
 
+Ohne Anmeldung heißt aber nicht ohne Schutz. Eine fremde Webseite könnte
+versuchen, über deinen Browser ans CMS zu kommen: Sie biegt ihren eigenen
+Namen kurzerhand auf `127.0.0.1` um (das heißt „DNS-Rebinding"). Der Browser
+verrät dabei aber, welchen Namen er aufgerufen hat. Das CMS antwortet deshalb
+nur, wenn dort `localhost` oder `127.0.0.1` steht, und sonst mit Fehler 403.
+Wer es unter einem anderen Namen aufruft, etwa über die Adresse im
+Heimnetz, startet es mit `--allowed-host <name>`.
+
 ---
 
 ## Die wichtigsten Stolperfallen
@@ -402,6 +410,8 @@ Läuft nebenher schon `hugo server` zum Vorschauen, dann mit
    `compose.yaml` oder ein gemeinsames Docker-Netz packen.
 7. **Die Ports im Caddy-Block müssen zum richtigen Kunden gehören.** Ein
    Tippfehler verbindet Kunde A mit dem CMS von Kunde B.
+   Und die Zeile `header_up Host {upstream_hostport}` darf nicht fehlen,
+   sonst antwortet das CMS auf alles mit Fehler 403.
 8. **`auth.toml` und `auth.key` nie in ein Git-Repo.** Sie liegen deshalb in
    `auth/` neben `site/`, nicht darin.
 

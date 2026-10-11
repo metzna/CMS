@@ -54,6 +54,9 @@ cd /srv/kunden/kunde-a && docker compose up -d
 
 Danach den Caddy-Block aus `Caddyfile.beispiel` eintragen; die Ports darin
 (8081 und 9001) sind dieselben wie in der `compose.yaml`.
+Die Zeile `header_up Host {upstream_hostport}` dort mit uebernehmen: Das CMS
+antwortet nur auf `localhost`-Namen (Schutz vor DNS-Rebinding) und sonst mit
+403. Bestehende Caddy-Bloecke brauchen sie ebenfalls.
 
 ### Drei Dinge, die hier schiefgehen
 

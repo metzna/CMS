@@ -29,7 +29,12 @@ cms.kunde-a.de {
             header_up X-Forwarded-Host {host}
             header_up X-Forwarded-Uri {uri}
         }
-        reverse_proxy 127.0.0.1:8081
+        # The CMS only answers to localhost names (protection against DNS
+        # rebinding), so Caddy passes 127.0.0.1:8081 as Host instead of
+        # cms.kunde-a.de. Without this line every request ends in 403.
+        reverse_proxy 127.0.0.1:8081 {
+            header_up Host {upstream_hostport}
+        }
     }
 
     encode zstd gzip

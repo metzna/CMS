@@ -58,6 +58,12 @@ UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 JSON_MAX_BYTES = 2 * 1024 * 1024
 IMAGE_MAX_EDGE = 2000       # longer edge, enough for any screen
 IMAGE_QUALITY = 80          # turns 1.1 MB into roughly 200 KB
+
+# Without login the CMS trusts everything that reaches 127.0.0.1. A foreign
+# page can still get there through the visitor's browser by pointing its own
+# domain at 127.0.0.1 (DNS rebinding) -- but the browser then sends that
+# domain as Host. So only these names are served; --allowed-host adds more.
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 UPLOAD_ROUTE = re.compile(r"^/uploads/(\d{4})/([a-z0-9][a-z0-9._-]*\.webp)$")
 
 # /api/sections/<id>/entries[/<file>]
@@ -374,6 +380,14 @@ def payload_to_values(data: dict) -> tuple[str, str, bool, str]:
     return title, day, bool(data.get("draft")), str(data.get("body", ""))
 
 
+def host_name(header: str) -> str:
+    """Host header without port and brackets, lowercased: '[::1]:8080' -> '::1'."""
+    header = header.strip().lower()
+    if header.startswith("["):
+        return header[1:header.find("]")] if "]" in header else ""
+    return header.rsplit(":", 1)[0] if ":" in header else header
+
+
 class CMSHandler(SimpleHTTPRequestHandler):
     # One process serves one site; main() sets these from cms.toml.
     content_dir: Path = DEFAULT_CONTENT_DIR
@@ -399,9 +413,20 @@ class CMSHandler(SimpleHTTPRequestHandler):
     # one picks up the new commits in another round.
     push_running = threading.Lock()
     push_again = False
+    allowed_hosts: set[str] = set(LOCAL_HOSTS)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
+
+    def parse_request(self) -> bool:
+        # Runs before every do_*, so no route can forget the check.
+        if not super().parse_request():
+            return False
+        if host_name(self.headers.get("Host", "")) not in self.allowed_hosts:
+            self.log_error("rejected Host header: %r", self.headers.get("Host"))
+            self.send_error(403, "Host not allowed")
+            return False
+        return True
 
     # --- Helpers ------------------------------------------------------
     def send_json(self, data, status: int = 200) -> None:
@@ -755,6 +780,11 @@ def main() -> None:
                         help="name in the commit (default: CMS)")
     parser.add_argument("--git-email", default="cms@localhost",
                         help="email in the commit (default: cms@localhost)")
+    parser.add_argument("--allowed-host", action="append", default=[],
+                        metavar="NAME",
+                        help="also accept requests with this Host header, "
+                             "e.g. cms.kunde-a.de (repeatable; localhost and "
+                             "127.0.0.1 are always allowed)")
     args = parser.parse_args()
 
     content_dir = args.content.resolve()
@@ -792,6 +822,9 @@ def main() -> None:
         CMSHandler.git_email = args.git_email
         CMSHandler.push = args.push
 
+    CMSHandler.allowed_hosts = LOCAL_HOSTS | {
+        host_name(name) for name in args.allowed_host}
+
     server = ThreadingHTTPServer((args.host, args.port), CMSHandler)
     server.daemon_threads = True   # don't wait for open connections on shutdown
     print(f"CMS running at http://{args.host}:{args.port}")
@@ -799,6 +832,7 @@ def main() -> None:
     print(f"Config:  {config_path}")
     print(f"Content: {content_dir}")
     print(f"Build:   {CMSHandler.hugo or 'off (--no-build)'}")
+    print(f"Hosts:   {', '.join(sorted(CMSHandler.allowed_hosts))}")
     if CMSHandler.repo is None:
         print("Git:     off")
     else:
