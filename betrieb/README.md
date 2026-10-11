@@ -10,7 +10,7 @@ wird zwischen Kunden geteilt.
 ```
 kunde-a.de       → Caddy liefert website/public/      (die fertige Seite)
 cms.kunde-a.de   → Caddy, davor die Anmeldung
-                     /login, /abmelden → auth.py    :9001
+                     /login, /logout   → auth.py    :9001
                      alles Uebrige     → server.py  :8081  (wenn angemeldet)
 ```
 
@@ -45,7 +45,7 @@ git clone <repo-oder-leer> /srv/kunden/kunde-a/site
 cp betrieb/compose.yaml.beispiel /srv/kunden/kunde-a/compose.yaml
 cp betrieb/auth.toml.beispiel    /srv/kunden/kunde-a/auth/auth.toml
 
-python3 cms/auth.py --passwort         # Hash erzeugen, in auth.toml eintragen
+python3 cms/auth.py --hash-password         # Hash erzeugen, in auth.toml eintragen
 $EDITOR /srv/kunden/kunde-a/auth/auth.toml
 
 chown -R 1000:1000 /srv/kunden/kunde-a # siehe unten
@@ -93,9 +93,9 @@ printf 'PORT=8081\nAUTH_PORT=9001\nCONTENT=/srv/kunden/kunde-a/site/website/cont
     > /etc/cms/kunde-a.env
 
 # 3. Zugang anlegen
-python3 /opt/cms/auth.py --passwort          # Hash erzeugen
+python3 /opt/cms/auth.py --hash-password          # Hash erzeugen
 cp betrieb/auth.toml.beispiel /etc/cms/kunde-a/auth.toml
-$EDITOR /etc/cms/kunde-a/auth.toml           # host, benutzer, passwort eintragen
+$EDITOR /etc/cms/kunde-a/auth.toml           # host, user, password eintragen
 
 # 4. Starten
 systemctl enable --now cms@kunde-a cms-auth@kunde-a
@@ -112,23 +112,23 @@ und `cms.kunde-a.de` loest lokal nicht auf. Fuer einen Blick auf die
 Loginseite braucht es eine kleine Konfiguration auf `localhost`:
 
 ```bash
-python3 cms/auth.py --passwort          # Hash erzeugen, Zeile kopieren
+python3 cms/auth.py --hash-password          # Hash erzeugen, Zeile kopieren
 
 cat > /tmp/auth-test.toml <<'TOML'
 host     = "localhost"
 name     = "Testkunde"
-benutzer = "ich"
-passwort = "<der Hash von oben>"
+user     = "ich"
+password = "<der Hash von oben>"
 TOML
 
-python3 -u cms/auth.py --config /tmp/auth-test.toml --unsicher
+python3 -u cms/auth.py --config /tmp/auth-test.toml --insecure
 ```
 
 Dann `http://localhost:9000/login` aufrufen. Nach der Anmeldung leitet der
 Dienst auf `/` weiter und antwortet dort mit 404 -- richtig so: diesen Pfad
 reicht im Betrieb Caddy ans CMS weiter, der Anmeldedienst kennt ihn nicht.
 
-`--unsicher` setzt das Cookie ohne `Secure`, damit es ueber `http://`
+`--insecure` setzt das Cookie ohne `Secure`, damit es ueber `http://`
 ueberhaupt ankommt. Nur lokal, nie im Netz. Das `-u` sorgt dafuer, dass die
 Meldungen sofort erscheinen statt im Puffer zu haengen.
 

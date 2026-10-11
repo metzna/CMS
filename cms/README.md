@@ -15,7 +15,7 @@ den Bild-Upload (`pip install Pillow`). Ohne Pillow laeuft alles Uebrige, nur
 Bilder lassen sich dann nicht hochladen. Sonst reicht die
 Python-Standardbibliothek.
 Optionen: `--port`, `--host`, `--content <ordner>`, `--config <datei>`,
-`--hugo <programm>`, `--kein-build`.
+`--hugo <programm>`, `--no-build`.
 
 Ein Prozess bedient genau eine Seite. Fuer eine zweite Seite einen zweiten
 Prozess starten:
@@ -38,7 +38,7 @@ Nach jedem Speichern und Loeschen laeuft `hugo` im Ordner ueber `content/`
 und schreibt `public/` neu — die Aenderung ist also sofort auf der Seite. Fuer
 diese Seite dauert das rund 60 ms, darum passiert es synchron: die Antwort
 sagt schon, ob es geklappt hat, und die Oberflaeche zeigt es neben
-„Speichern“ als Ring und danach als Haken.
+„Save“ als Ring und danach als Haken.
 
 Waehrend Speichern oder Loeschen laeuft, sind die Knoepfe gesperrt — auch
 `Strg+S`, das sonst am Knopf vorbeiginge. Ohne das legte ein Doppelklick auf
@@ -63,19 +63,19 @@ timeZone = 'Europe/Berlin'
 Ohne das liest Hugo ein `date: 2026-09-19` als **UTC**-Mitternacht. Zwischen
 00:00 und 02:00 mitteleuropaeischer Sommerzeit liegt die noch in der
 Zukunft, und Hugo laesst den Beitrag als terminiert aus dem Build heraus --
-ohne Fehler, mit Exit-Code 0. Das CMS meldet dann "gespeichert und erzeugt",
+ohne Fehler, mit Exit-Code 0. Das CMS meldet dann "Saved: …",
 und der Beitrag steht trotzdem nicht auf der Seite. Nachts geschriebene
 Beitraege erscheinen so erst Stunden spaeter.
 
 ## Bilder
 
-**Bild** in der Werkzeugleiste oeffnet die Dateiauswahl; ein Bild laesst sich
+**Image** in der Werkzeugleiste oeffnet die Dateiauswahl; ein Bild laesst sich
 auch einfach ins Textfeld ziehen. Danach steht die Markdown-Zeile an der
-Cursorposition, und der Platzhalter `Bildbeschreibung` ist markiert, damit
+Cursorposition, und der Platzhalter `Image description` ist markiert, damit
 er gleich ueberschrieben werden kann:
 
 ```markdown
-![Bildbeschreibung](/uploads/2026/hoffest-im-sommer.webp)
+![Image description](/uploads/2026/hoffest-im-sommer.webp)
 ```
 
 Beim Hochladen rechnet das CMS jedes Bild in **WebP** um: laengere Kante
@@ -100,7 +100,7 @@ Grenzen:
   und im Code registrieren.
 - Aus einem animierten GIF wird ein Standbild.
 - Werte fuer Breite und Qualitaet stehen oben in `server.py`
-  (`BILD_BREITE`, `BILD_QUALITAET`).
+  (`IMAGE_MAX_EDGE`, `IMAGE_QUALITY`).
 
 ## Versionsgeschichte und Sicherung
 
@@ -131,11 +131,11 @@ python3 cms/server.py --git --push --git-name "CMS" --git-email "cms@kunde-a.de"
 ## Beim Entwickeln
 
 Wer ohnehin `hugo server` laufen laesst, schaltet den Build
-mit `--kein-build` ab:
+mit `--no-build` ab:
 
 ```bash
 cd website && hugo server --buildDrafts
-python3 cms/server.py --kein-build
+python3 cms/server.py --no-build
 ```
 
 ## Konfiguration
@@ -172,21 +172,21 @@ auffallen, nicht beim ersten Klick.
 3. Server neu starten — `cms.toml` wird nur beim Start gelesen.
 
 Fehlt der Ordner, erscheint die Sektion in der Auswahl als
-„(Ordner fehlt)" und ist nicht anwählbar — der Server startet trotzdem.
+„(folder missing)" und ist nicht anwählbar — der Server startet trotzdem.
 
 ## Bedienung
 
 - Oben links die Sektion wählen, darunter die Einträge; Klick öffnet einen.
-- **+ Neu** legt einen Eintrag in der gewählten Sektion an; der Dateiname
+- **+ New** legt einen Eintrag in der gewählten Sektion an; der Dateiname
   entsteht aus dem Titel (`Herbstlesung im Hof` → `herbstlesung-im-hof.md`),
   bei Namensgleichheit mit angehängter Nummer.
-- **Vorschau** blendet die gerenderte Ansicht neben den Editor.
-- **Speichern** oder `Strg+S` schreibt die Datei und erzeugt die Seite neu.
-- **Löschen** entfernt den offenen Eintrag nach einer Rückfrage. Die Datei
+- **Preview** blendet die gerenderte Ansicht neben den Editor.
+- **Save** oder `Strg+S` schreibt die Datei und erzeugt die Seite neu.
+- **Delete** entfernt den offenen Eintrag nach einer Rückfrage. Die Datei
   ist danach weg — kein Papierkorb. Bei einem noch nicht gespeicherten
   Eintrag erscheint der Knopf nicht.
-- **Entwurf** setzt `draft: true` — solche Einträge landen nicht im Build.
-- Unten links schaltet **Darstellung** zwischen System, Hell und Dunkel;
+- **Draft** setzt `draft: true` — solche Einträge landen nicht im Build.
+- Unten links schaltet **Theme** zwischen System, Light und Dark;
   die Wahl bleibt im Browser gespeichert.
 
 ## Grenzen

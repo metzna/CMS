@@ -1,9 +1,9 @@
-# Eine Website. Diese Datei gehoert neben den Ordner des Kunden, also z. B.
-# nach /srv/kunden/kunde-a/compose.yaml -- dort dann "docker compose up -d".
+# One website. This file belongs next to the customer's folder, e.g. at
+# /srv/kunden/kunde-a/compose.yaml -- then run "docker compose up -d" there.
 #
-# Zwei Dienste aus demselben Image: das CMS und die Anmeldung davor. Getrennt,
-# weil ein Container ein Programm betreuen soll; das Image ist fuer beide das
-# gleiche, es kostet also keinen zusaetzlichen Platz.
+# Two services from the same image: the CMS and the login in front of it.
+# Separate, because one container should run one program; the image is the
+# same for both, so it takes no extra space.
 
 name: kunde-a
 
@@ -11,25 +11,25 @@ services:
   cms:
     image: cms:0.131.0
     restart: unless-stopped
-    # Das Programm braucht keine Sonderrechte: alle abgeben, und nie neue
-    # dazubekommen, auch nicht ueber setuid-Programme im Image.
+    # The program needs no special privileges: drop them all, and never gain
+    # new ones, not even via setuid programs in the image.
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    # --git haelt jede Aenderung als Commit fest, --push sichert sie ausser
-    # Haus. Fuer --push braucht der Container einen Deploy-Key: dann hier
-    # zusaetzlich ~/.ssh als read-only Volume und den remote im Klon setzen.
+    # --git records every change as a commit, --push backs it up off-site.
+    # For --push the container needs a deploy key: then also mount ~/.ssh
+    # here as a read-only volume and set the remote in the clone.
     command: ["python3", "-u", "/opt/cms/server.py",
               "--host", "0.0.0.0", "--port", "8080",
               "--content", "/site/website/content",
               "--git", "--git-name", "CMS", "--git-email", "cms@kunde-a.de"]
-    # WICHTIG: 127.0.0.1 davor. Ohne das traegt Docker den Port an der
-    # Firewall vorbei nach aussen -- der Port waere offen im Internet,
-    # auch bei aktivem ufw.
+    # IMPORTANT: 127.0.0.1 in front. Without it Docker exposes the port past
+    # the firewall -- the port would be open to the internet, even with ufw
+    # active.
     ports:
       - "127.0.0.1:8081:8080"
     volumes:
-      # Die Inhalte leben auf dem Host. Der Container ist Wegwerfware,
-      # dieser Ordner nicht: hierhin git, hierhin das Backup.
+      # The content lives on the host. The container is disposable, this
+      # folder is not: git goes here, the backup goes here.
       - ./site:/site
     healthcheck:
       test: ["CMD", "python3", "-c",
@@ -41,8 +41,8 @@ services:
   auth:
     image: cms:0.131.0
     restart: unless-stopped
-    # Das Programm braucht keine Sonderrechte: alle abgeben, und nie neue
-    # dazubekommen, auch nicht ueber setuid-Programme im Image.
+    # The program needs no special privileges: drop them all, and never gain
+    # new ones, not even via setuid programs in the image.
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     command: ["python3", "-u", "/opt/cms/auth.py",
@@ -51,8 +51,8 @@ services:
     ports:
       - "127.0.0.1:9001:9000"
     volumes:
-      # Enthaelt auth.toml und den beim ersten Start erzeugten auth.key.
-      # Muss beschreibbar sein, sonst kann der Schluessel nicht entstehen.
+      # Contains auth.toml and the auth.key created on first start.
+      # Must be writable, otherwise the key can't be created.
       - ./auth:/auth
     healthcheck:
       test: ["CMD", "python3", "-c",

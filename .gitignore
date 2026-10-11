@@ -1,4 +1,4 @@
-# Hugo-Build
+# Hugo build
 website/public/
 website/resources/
 .hugo_build.lock
@@ -7,7 +7,7 @@ website/resources/
 __pycache__/
 *.pyc
 
-# Sitzungsschluessel des Anmeldedienstes -- gehoert nie ins Repo
+# Session key of the login service -- never belongs in the repo
 auth.key
 
 .DS_Store

@@ -1,32 +1,32 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CMS</title>
   <link rel="stylesheet" href="style.css">
   <script>
-    // Vor dem Rendern setzen, sonst blitzt kurz das falsche Schema auf.
+    // Set before rendering, otherwise the wrong scheme flashes briefly.
     try {
-      const gewaehlt = localStorage.getItem("cms-theme");
-      if (gewaehlt === "light" || gewaehlt === "dark") {
-        document.documentElement.dataset.theme = gewaehlt;
+      const chosen = localStorage.getItem("cms-theme");
+      if (chosen === "light" || chosen === "dark") {
+        document.documentElement.dataset.theme = chosen;
       }
-    } catch (fehler) { /* kein Zugriff auf localStorage: dann eben System */ }
+    } catch (error) { /* no access to localStorage: fall back to system */ }
   </script>
 </head>
 <body>
   <aside class="sidebar">
     <div class="sidebar-head">
       <label class="section-picker">
-        <span class="visually-hidden">Sektion</span>
+        <span class="visually-hidden">Section</span>
         <select id="section"></select>
       </label>
-      <button id="new-post" type="button">+ Neu</button>
+      <button id="new-post" type="button">+ New</button>
     </div>
     <ul id="post-list" class="post-list"></ul>
     <div class="sidebar-foot">
-      <button id="theme" type="button" aria-live="polite">Darstellung: System</button>
+      <button id="theme" type="button" aria-live="polite">Theme: System</button>
     </div>
   </aside>
 
@@ -34,35 +34,35 @@
     <form id="post-form" hidden>
       <div class="fields">
         <label class="field grow">
-          <span>Titel</span>
-          <!-- Kein " und kein \ im Titel: title: "..." im Frontmatter waere sonst kaputt.
-               Der Server prueft das ebenfalls, das hier meldet es nur frueher. -->
+          <span>Title</span>
+          <!-- No " and no \ in the title: title: "..." in the front matter would break.
+               The server checks this too; this just reports it earlier. -->
           <input id="title" name="title" type="text" required autocomplete="off"
                  pattern="[^&quot;\\]*"
-                 title="&quot; und \ sind im Titel nicht erlaubt.">
+                 title="&quot; and \ are not allowed in the title.">
         </label>
         <label class="field">
-          <span>Datum</span>
+          <span>Date</span>
           <input id="date" name="date" type="date" required>
         </label>
         <label class="field check">
           <input id="draft" name="draft" type="checkbox">
-          <span>Entwurf</span>
+          <span>Draft</span>
         </label>
       </div>
 
       <div class="toolbar">
         <span id="filename" class="filename"></span>
-        <!-- Links, mit Abstand zu "Speichern": ein Fehlklick waere aergerlich. -->
-        <button id="delete" type="button" class="danger" hidden>Löschen</button>
+        <!-- On the left, away from "Save": a misclick would be annoying. -->
+        <button id="delete" type="button" class="danger" hidden>Delete</button>
         <div class="toolbar-right">
-          <button id="bild" type="button">Bild</button>
-          <input id="bilddatei" type="file" accept="image/*" hidden>
-          <button id="toggle-preview" type="button">Vorschau</button>
-          <button id="save" type="submit" class="primary">Speichern</button>
-          <!-- Zeigt Speichern und Erzeugen als einen Vorgang. Der Text dazu
-               steht in der Statuszeile, darum hier aria-hidden. -->
-          <span id="bau" class="bau" aria-hidden="true"></span>
+          <button id="image" type="button">Image</button>
+          <input id="image-file" type="file" accept="image/*" hidden>
+          <button id="toggle-preview" type="button">Preview</button>
+          <button id="save" type="submit" class="primary">Save</button>
+          <!-- Shows saving and building as one operation. The matching text
+               is in the status line, hence aria-hidden here. -->
+          <span id="build-state" class="build-state" aria-hidden="true"></span>
         </div>
       </div>
 
@@ -73,7 +73,7 @@
       </div>
     </form>
 
-    <p id="empty" class="empty">Links einen Beitrag wählen oder einen neuen anlegen.</p>
+    <p id="empty" class="empty">Pick an entry on the left or create a new one.</p>
     <p id="status" class="status" role="status"></p>
   </main>
 

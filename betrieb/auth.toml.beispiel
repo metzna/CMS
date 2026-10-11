@@ -1,20 +1,20 @@
-# Zugang zu dieser einen Website. Gehoert neben die Seite, nicht ins Repo --
-# hier steht ein Passwort-Hash.
+# Access to this one website. Belongs next to the site, not in the repo --
+# it contains a password hash.
 #
-# Hash erzeugen:
-#     python3 cms/auth.py --passwort
+# Generate the hash:
+#     python3 cms/auth.py --hash-password
 #
-# Der Sitzungsschluessel liegt daneben in auth.key (entsteht beim ersten
-# Start, Rechte 0600). Wird er geloescht, ist jede Sitzung ungueltig -- so
-# meldet man alle Angemeldeten auf einmal ab.
+# The session key sits next to it in auth.key (created on first start,
+# mode 0600). Deleting it invalidates every session -- that is how to log
+# everyone out at once.
 
-# MUSS. Unter dieser Adresse laeuft die Oberflaeche. Muss zum Caddy-Block
-# passen: kommt eine Anfrage mit anderem Host an, lehnt der Dienst sie ab.
+# REQUIRED. The UI runs under this address. Must match the Caddy block:
+# if a request arrives with a different host, the service rejects it.
 host = "cms.kunde-a.de"
 
-# KANN. Ueberschrift der Loginseite. Vorgabe: host.
+# OPTIONAL. Heading of the login page. Default: host.
 name = "Bäckerei Meier"
 
-# MUSS. Genau ein Zugang je Website.
-benutzer = "meier"
-passwort = "scrypt$16384$8$1$…$…"
+# REQUIRED. Exactly one account per website.
+user     = "meier"
+password = "scrypt$16384$8$1$…$…"

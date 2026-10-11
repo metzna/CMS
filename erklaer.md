@@ -59,9 +59,9 @@ Seite neu bauen. Das übernimmt das CMS automatisch.
 
 ---
 
-## Was passiert, wenn der Kunde auf „Speichern" klickt
+## Was passiert, wenn der Kunde auf „Save" klickt
 
-1. **Die Knöpfe werden gesperrt** und neben „Speichern" dreht sich ein Ring.
+1. **Die Knöpfe werden gesperrt** und neben „Save" dreht sich ein Ring.
    So kann ein Doppelklick nichts doppelt anlegen.
 2. Der Browser schickt den Text an das CMS.
 3. Das CMS **schreibt die Datei** in den Ordner `content/`. Erst in eine
@@ -79,7 +79,7 @@ Seite neu bauen. Das übernimmt das CMS automatisch.
 
 ### Bilder
 
-Über den Knopf **Bild** oder durch Hineinziehen ins Textfeld. Das CMS rechnet
+Über den Knopf **Image** oder durch Hineinziehen ins Textfeld. Das CMS rechnet
 jedes Bild sofort in das platzsparende Format **WebP** um und verkleinert es
 auf höchstens 2000 Pixel. Aus einem Handyfoto von mehreren Megabyte werden so
 etwa 200 Kilobyte, ohne sichtbaren Qualitätsverlust. Das hat drei Vorteile:
@@ -97,10 +97,10 @@ welcher Schritt nicht geklappt hat:
 
 | Statuszeile | Bedeutung |
 |---|---|
-| `Gespeichert: x.md` | Alles hat geklappt |
-| `Gespeichert, aber die Seite wurde nicht neu erzeugt: …` | Text ist da, aber Hugo hatte ein Problem |
-| `Gespeichert, aber nicht in die Versionsgeschichte aufgenommen: …` | Text ist da und auf der Seite, aber Git hatte ein Problem |
-| `Gespeichert: x.md — die Sicherung klemmt: …` | Alles da, nur die Kopie außer Haus hat nicht geklappt |
+| `Saved: x.md` | Alles hat geklappt |
+| `Saved, but the site was not rebuilt: …` | Text ist da, aber Hugo hatte ein Problem |
+| `Saved, but not recorded in the version history: …` | Text ist da und auf der Seite, aber Git hatte ein Problem |
+| `Saved: x.md — the backup is stuck: …` | Alles da, nur die Kopie außer Haus hat nicht geklappt |
 
 Es kann immer nur **ein Schreibvorgang gleichzeitig** laufen. Zwei Hugo-Läufe
 oder zwei Git-Commits zur selben Zeit würden sich gegenseitig stören. Lesen,
@@ -141,7 +141,7 @@ aus der Zeichenkette lässt sich das Passwort nicht zurückgewinnen, so wie
 aus Hackfleisch keine Kuh mehr wird.
 
 ```toml
-passwort = "scrypt$16384$8$1$l1Q5QpvEfjXMY0OdrEmXfQ==$MjL8T4Itg…"
+password = "scrypt$16384$8$1$l1Q5QpvEfjXMY0OdrEmXfQ==$MjL8T4Itg…"
 ```
 
 Beim Anmelden wird das eingegebene Passwort durch denselben Fleischwolf
@@ -166,7 +166,7 @@ sollen.
 ### Was sonst noch schützt
 
 - **Benutzername und Passwort werden immer beide geprüft**, und die
-  Fehlermeldung ist immer dieselbe („Benutzer oder Passwort stimmt nicht").
+  Fehlermeldung ist immer dieselbe („Wrong username or password").
   Ein Angreifer erfährt also nicht, ob wenigstens der Name stimmte.
 - **Bremse gegen Durchprobieren:** Nach 10 Fehlversuchen innerhalb von
   5 Minuten sperrt der Dienst diese Internetadresse für eine Weile.
@@ -193,7 +193,7 @@ Nach außen offen ist **nur Caddy**. Jede Anfrage muss also durch Caddy.
 
 Caddy sortiert jede Anfrage an `cms.kunde-a.de`:
 
-1. **`/login` und `/abmelden`** gehen direkt an die Anmeldung. Die müssen
+1. **`/login` und `/logout`** gehen direkt an die Anmeldung. Die müssen
    offen sein, sonst käme niemand zum Formular. Die Anmeldung liefert aber
    nie Inhalte des CMS aus.
 2. **Alles andere** hält Caddy erst an und fragt die Anmeldung: „Darf der
@@ -336,13 +336,13 @@ In `compose.yaml` anpassen: `name`, die zwei Ports (je Kunde hochzählen:
 **4. Passwort erzeugen und Zugang eintragen.**
 
 ```bash
-docker run --rm -it cms:0.131.0 python3 /opt/cms/auth.py --passwort
+docker run --rm -it cms:0.131.0 python3 /opt/cms/auth.py --hash-password
 ```
 
 Das Programm fragt das Passwort zweimal verdeckt ab und gibt eine Zeile
-`passwort = "scrypt$…"` aus. In `auth/auth.toml` eintragen: `host`
+`password = "scrypt$…"` aus. In `auth/auth.toml` eintragen: `host`
 (`cms.kunde-a.de`), `name` (erscheint als Überschrift der Loginseite),
-`benutzer` und diese `passwort`-Zeile.
+`user` und diese `password`-Zeile.
 
 **5. Rechte setzen.**
 
@@ -379,7 +379,7 @@ python3 cms/server.py            # dann http://127.0.0.1:8080 öffnen
 ```
 
 Läuft nebenher schon `hugo server` zum Vorschauen, dann mit
-`--kein-build` starten, damit nicht zwei Programme gleichzeitig bauen.
+`--no-build` starten, damit nicht zwei Programme gleichzeitig bauen.
 
 ---
 
@@ -411,12 +411,12 @@ Läuft nebenher schon `hugo server` zum Vorschauen, dann mit
 
 | Was man sieht | Was es bedeutet | Was tun |
 |---|---|---|
-| „…die Seite wurde nicht neu erzeugt: Error: …" | Hugo kam mit einer Datei oder Vorlage nicht klar | Meldung lesen, Details mit `docker compose logs cms` |
-| „…nicht in die Versionsgeschichte aufgenommen" | Git hatte ein Problem | Rechte am Ordner prüfen, `docker compose logs cms` |
-| „…die Sicherung klemmt" | Die Kopie außer Haus ging nicht durch | Remote und Deploy-Key prüfen. Der Text ist trotzdem sicher |
-| Beitrag gespeichert, aber nicht auf der Seite | Meist Entwurf angehakt, Datum in der Zukunft oder `timeZone` fehlt | Häkchen „Entwurf", Datum und `hugo.toml` prüfen |
-| „· unlesbar" in der Liste | Die Datei ist nicht in UTF-8 gespeichert | Datei in UTF-8 umwandeln |
-| „Zu viele Versuche" beim Login | Die Bremse hat angeschlagen | 5 Minuten warten oder Anmeldedienst neu starten |
+| „…the site was not rebuilt: Error: …" | Hugo kam mit einer Datei oder Vorlage nicht klar | Meldung lesen, Details mit `docker compose logs cms` |
+| „…not recorded in the version history" | Git hatte ein Problem | Rechte am Ordner prüfen, `docker compose logs cms` |
+| „…the backup is stuck" | Die Kopie außer Haus ging nicht durch | Remote und Deploy-Key prüfen. Der Text ist trotzdem sicher |
+| Beitrag gespeichert, aber nicht auf der Seite | Meist Entwurf angehakt, Datum in der Zukunft oder `timeZone` fehlt | Häkchen „Draft", Datum und `hugo.toml` prüfen |
+| „· unreadable" in der Liste | Die Datei ist nicht in UTF-8 gespeichert | Datei in UTF-8 umwandeln |
+| „Too many attempts" beim Login | Die Bremse hat angeschlagen | 5 Minuten warten oder Anmeldedienst neu starten |
 | Fehler 502 von Caddy | Ein Container läuft nicht | `docker compose ps`, dann `docker compose up -d` |
 | Container startet nicht | Meist eine fehlerhafte `cms.toml` oder `auth.toml` | `docker compose logs`, die Meldung nennt Datei und Grund |
 
@@ -436,7 +436,7 @@ Einrichten auffallen, nicht erst beim Kunden.
   einen Deploy-Key. Ist vorbereitet, aber noch nicht eingerichtet.
 - **Überwachung:** Wenn nachts ein Container neu startet, merkt es noch
   niemand.
-- Vorgeschlagen, aber nicht gebaut: `--passwort` erzeugt selbst ein
+- Vorgeschlagen, aber nicht gebaut: `--hash-password` erzeugt selbst ein
   zufälliges Passwort, und eine Warnung beim Start, wenn `timeZone` fehlt.
 
 ---

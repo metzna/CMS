@@ -1,39 +1,39 @@
 # ---------------------------------------------------------------------------
-# CMS-Konfiguration dieser Seite.
+# CMS configuration for this site.
 #
-# Liegt neben dem content-Ordner, also im Repo der Seite und nicht beim CMS:
-# jede Kundenseite bringt ihre eigene mit. Anderer Pfad: --config <datei>.
+# Lives next to the content folder, i.e. in the site's repo and not with the
+# CMS: every customer site brings its own. Different path: --config <file>.
 #
-# Wird nur beim Start gelesen — nach einer Änderung den Server neu starten.
-# Ist etwas daran fehlerhaft, startet der Server nicht und nennt Stelle und
-# Grund. Das ist Absicht: lieber beim Hochfahren auffallen als beim Kunden.
+# Only read at startup — restart the server after a change. If anything in it
+# is broken, the server won't start and names the location and reason. That's
+# intentional: better to fail at startup than in front of the customer.
 # ---------------------------------------------------------------------------
 
 
-# KANN. Steht im Browser-Tab der Oberfläche. Vorgabe: "CMS".
-# Bei mehreren offenen Kunden-Tabs ist das der einzige Unterschied.
+# OPTIONAL. Shown in the browser tab of the UI. Default: "CMS".
+# With several customer tabs open, this is the only difference.
 title = "Meine Seite"
 
 
-# MUSS: mindestens ein [[sections]]-Block. Jeder gibt einen Unterordner von
-# content/ zur Bearbeitung frei — was hier nicht steht, sieht der Kunde nicht.
+# REQUIRED: at least one [[sections]] block. Each one opens a subfolder of
+# content/ for editing — whatever isn't listed here, the customer doesn't see.
 #
-# Die Reihenfolge hier ist die Reihenfolge im Auswahlmenü; vorausgewählt ist
-# beim Öffnen die erste Sektion, deren Ordner existiert.
+# The order here is the order in the dropdown; on opening, the first section
+# whose folder exists is preselected.
 #
-#   dir    MUSS.  Unterordner in content/. Nur a-z, 0-9, - und _, kein
-#                 Schrägstrich. Der Ordner muss angelegt sein, sonst steht
-#                 die Sektion als "(Ordner fehlt)" da und ist nicht wählbar.
-#   name   KANN.  Beschriftung im Auswahlmenü. Vorgabe: dir.
-#   id     KANN.  Taucht in der URL auf (/api/sections/<id>/entries).
-#                 Vorgabe: dir. Gleiche Zeichen wie dir, und je Datei nur
-#                 einmal vergeben. Nur nötig, wenn die URL vom Ordnernamen
-#                 abweichen soll — etwa weil der Ordner später umzieht.
+#   dir    REQUIRED.  Subfolder in content/. Only a-z, 0-9, - and _, no
+#                     slash. The folder must exist, otherwise the section
+#                     shows as "(folder missing)" and can't be selected.
+#   name   OPTIONAL.  Label in the dropdown. Default: dir.
+#   id     OPTIONAL.  Appears in the URL (/api/sections/<id>/entries).
+#                     Default: dir. Same characters as dir, and unique per
+#                     file. Only needed if the URL should differ from the
+#                     folder name — e.g. because the folder moves later.
 #
-# Unabhängig von dem, was hier steht, nie bearbeitbar: die _index.md der
-# Sektionen (die Übersichtstexte) und alles ausserhalb der genannten Ordner.
-# Ein Eintrag ist immer eine .md-Datei direkt im Ordner; Hugos Page Bundles
-# (eigener Unterordner je Beitrag) tauchen in der Liste nicht auf.
+# Never editable, regardless of what's here: the sections' _index.md (the
+# overview texts) and anything outside the listed folders. An entry is always
+# a .md file directly in the folder; Hugo page bundles (a subfolder per post)
+# don't show up in the list.
 
 [[sections]]
 dir = "posts"

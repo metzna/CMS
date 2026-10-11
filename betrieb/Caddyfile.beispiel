@@ -1,31 +1,31 @@
-# Beispiel fuer eine Website. Je Website ein solcher Block -- am besten von
-# der Bereitstellung erzeugt und per "import kunden/*.caddy" eingebunden.
+# Example for one website. One such block per website -- ideally generated
+# by the deployment and included via "import kunden/*.caddy".
 #
-# Dazu gehoert ein zweiter Block fuer die oeffentliche Seite selbst:
+# It comes with a second block for the public site itself:
 #
 #     kunde-a.de {
 #         root * /srv/kunden/kunde-a/site/website/public
 #         file_server
 #     }
 #
-# Caddy holt die Zertifikate allein, sofern die Namen auf den Server zeigen.
+# Caddy fetches the certificates itself, as long as the names point to the server.
 
 cms.kunde-a.de {
 
-    # Anmeldung: geht am Waechter vorbei, sonst kaeme man nie zum Formular.
-    # 9001 ist der Anmeldedienst DIESER Seite -- je Website ein eigener.
+    # Login: bypasses the guard, otherwise you'd never reach the form.
+    # 9001 is the login service of THIS site -- a separate one per website.
     handle /login* {
         reverse_proxy 127.0.0.1:9001
     }
-    handle /abmelden {
+    handle /logout {
         reverse_proxy 127.0.0.1:9001
     }
 
-    # Alles andere nur mit gueltiger Sitzung. forward_auth fragt vor jedem
-    # Request bei /pruefen nach; 200 laesst durch, 302 schickt zum Login.
+    # Everything else only with a valid session. forward_auth asks /check
+    # before every request; 200 lets through, 302 sends to the login.
     handle {
         forward_auth 127.0.0.1:9001 {
-            uri /pruefen
+            uri /check
             header_up X-Forwarded-Host {host}
             header_up X-Forwarded-Uri {uri}
         }

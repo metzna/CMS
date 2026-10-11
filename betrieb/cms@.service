@@ -1,7 +1,7 @@
 # /etc/systemd/system/cms@.service   ->   systemctl enable --now cms@kunde-a
-# Eine Unit fuer alle Kunden; %i ist die Kunden-ID.
+# One unit for all customers; %i is the customer ID.
 [Unit]
-Description=CMS fuer %i
+Description=CMS for %i
 After=network.target
 
 [Service]
@@ -10,7 +10,7 @@ EnvironmentFile=/etc/cms/%i.env
 ExecStart=/usr/bin/python3 -u /opt/cms/server.py --port ${PORT} --content ${CONTENT}
 Restart=on-failure
 
-# Selbst ein Fehler im CMS kaeme nicht aus dem Kundenordner heraus.
+# Even a bug in the CMS couldn't get out of the customer folder.
 ProtectSystem=strict
 ReadWritePaths=/srv/kunden/%i
 PrivateTmp=yes

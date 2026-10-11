@@ -1,5 +1,5 @@
-# Alles, was nicht ins Image gehoert. Ohne das wandert der halbe Ordner in
-# den Build-Kontext -- inklusive der gebauten Seite und der Git-Historie.
+# Everything that doesn't belong in the image. Without this, half the folder
+# ends up in the build context -- including the built site and git history.
 .git
 .gitignore
 website/

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Kleines CMS fuer die Hugo-Seite.
+"""Small CMS for the Hugo site.
 
-Bearbeitet die Markdown-Dateien in den Unterordnern von website/content/.
-Welche Ordner das sind, steht in cms.toml neben dem content-Ordner.
+Edits the Markdown files in the subfolders of website/content/.
+Which folders those are is set in cms.toml next to the content folder.
 
 Start:  python3 cms/server.py
         python3 cms/server.py --port 8000 --content /srv/kunde-a/website/content
@@ -26,109 +26,109 @@ from urllib.parse import unquote
 
 try:
     from PIL import Image, ImageOps, UnidentifiedImageError
-except ImportError:          # ohne Pillow laeuft alles ausser dem Bild-Upload
+except ImportError:          # without Pillow everything except image upload works
     Image = None
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 DEFAULT_CONTENT_DIR = BASE_DIR.parent / "website" / "content"
 
-# Welche Sektionen bearbeitbar sind, steht in cms.toml neben dem content-Ordner.
+# Which sections are editable is set in cms.toml next to the content folder.
 CONFIG_NAME = "cms.toml"
 
-# Nach jedem Schreiben laeuft Hugo. Fuer diese Seite dauert das ~60 ms, darum
-# synchron: die Antwort sagt dann schon, ob die Seite wirklich neu steht.
+# Hugo runs after every write. For this site that takes ~60 ms, so it runs
+# synchronously: the response can then already say whether the site is rebuilt.
 BUILD_TIMEOUT = 60
 
-# Commit laeuft im Request und ist rein lokal. Der Push geht ins Netz und
-# laeuft deshalb nebenher -- er darf das Speichern des Kunden nie aufhalten.
+# Commit runs inside the request and is purely local. Push goes over the
+# network and therefore runs in the background -- it must never hold up a save.
 GIT_TIMEOUT = 15
 PUSH_TIMEOUT = 120
 
-# Nur einfache Dateinamen, kein Pfadwechsel, kein Listenindex des Abschnitts.
+# Only plain file names: no path change, no section list index.
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\.md$")
 SAFE_DIR = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 RESERVED = {"_index.md", "index.md"}
 
-# Bilder: hochgeladen wird in static/uploads/<jahr>/, ausgeliefert unter /uploads/.
-# static/ kopiert Hugo unveraendert, das Bild ist also ohne Zutun auf der Seite.
+# Images: uploaded to static/uploads/<year>/, served under /uploads/.
+# Hugo copies static/ unchanged, so the image is on the site without extra work.
 UPLOAD_DIR = "uploads"
 UPLOAD_MAX_BYTES = 25 * 1024 * 1024
-BILD_BREITE = 2000          # laengere Kante, reicht fuer jeden Bildschirm
-BILD_QUALITAET = 80         # daraus werden aus 1,1 MB rund 200 KB
+IMAGE_MAX_EDGE = 2000       # longer edge, enough for any screen
+IMAGE_QUALITY = 80          # turns 1.1 MB into roughly 200 KB
 UPLOAD_ROUTE = re.compile(r"^/uploads/(\d{4})/([a-z0-9][a-z0-9._-]*\.webp)$")
 
-# /api/sections/<id>/entries[/<datei>]
+# /api/sections/<id>/entries[/<file>]
 ENTRIES_ROUTE = re.compile(r"^/api/sections/([a-z0-9][a-z0-9_-]*)/entries(?:/([^/]+))?$")
-# Muss zum Sektionsteil von ENTRIES_ROUTE passen, sonst ist die Sektion nicht erreichbar.
+# Must match the section part of ENTRIES_ROUTE, otherwise the section is unreachable.
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
-UMLAUTE = {"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}
+UMLAUT_MAP = {"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"}
 
 
 class PostError(Exception):
-    """Fehler, der als 400 an die Oberflaeche zurueckgeht."""
+    """Error that goes back to the UI as a 400."""
 
 
 def load_config(path: Path) -> tuple[str, list[dict]]:
-    """Liest cms.toml und prueft sie.
+    """Reads cms.toml and validates it.
 
-    Alles, was hier schiefgeht, bricht den Start ab: eine kaputte
-    Konfiguration soll beim Hochfahren auffallen, nicht beim ersten Klick.
+    Anything that goes wrong here aborts startup: a broken config should
+    show up when the server starts, not on the first click.
     """
     try:
-        with path.open("rb") as datei:
-            daten = tomllib.load(datei)
+        with path.open("rb") as file:
+            data = tomllib.load(file)
     except FileNotFoundError:
-        raise SystemExit(f"Konfiguration nicht gefunden: {path}")
+        raise SystemExit(f"Config not found: {path}")
     except tomllib.TOMLDecodeError as exc:
-        raise SystemExit(f"{path}: kein gueltiges TOML -- {exc}")
+        raise SystemExit(f"{path}: not valid TOML -- {exc}")
 
-    titel = str(daten.get("title") or "").strip() or "CMS"
-    roh = daten.get("sections")
-    if not isinstance(roh, list) or not roh:
-        raise SystemExit(f"{path}: mindestens eine [[sections]]-Tabelle noetig.")
+    title = str(data.get("title") or "").strip() or "CMS"
+    raw = data.get("sections")
+    if not isinstance(raw, list) or not raw:
+        raise SystemExit(f"{path}: at least one [[sections]] table is required.")
 
     sections: list[dict] = []
-    vergeben: set[str] = set()
-    for nummer, eintrag in enumerate(roh, 1):
-        stelle = f"{path}: [[sections]] Nr. {nummer}"
-        if not isinstance(eintrag, dict):
-            raise SystemExit(f"{stelle} ist keine Tabelle.")
-        ordner = str(eintrag.get("dir") or "").strip()
-        if not SAFE_DIR.fullmatch(ordner):
+    taken: set[str] = set()
+    for number, entry in enumerate(raw, 1):
+        where = f"{path}: [[sections]] no. {number}"
+        if not isinstance(entry, dict):
+            raise SystemExit(f"{where} is not a table.")
+        folder = str(entry.get("dir") or "").strip()
+        if not SAFE_DIR.fullmatch(folder):
             raise SystemExit(
-                f"{stelle}: dir fehlt oder ist unzulaessig (klein, ohne "
-                f"Schraegstrich): {ordner!r}"
+                f"{where}: dir is missing or invalid (lowercase, no "
+                f"slash): {folder!r}"
             )
-        kennung = str(eintrag.get("id") or ordner).strip()
-        if not SAFE_ID.fullmatch(kennung):
-            raise SystemExit(f"{stelle}: id ist unzulaessig: {kennung!r}")
-        if kennung in vergeben:
-            raise SystemExit(f"{stelle}: id kommt mehrfach vor: {kennung!r}")
-        vergeben.add(kennung)
+        section_id = str(entry.get("id") or folder).strip()
+        if not SAFE_ID.fullmatch(section_id):
+            raise SystemExit(f"{where}: id is invalid: {section_id!r}")
+        if section_id in taken:
+            raise SystemExit(f"{where}: id appears more than once: {section_id!r}")
+        taken.add(section_id)
         sections.append({
-            "id": kennung,
-            "name": str(eintrag.get("name") or ordner).strip(),
-            "dir": ordner,
+            "id": section_id,
+            "name": str(entry.get("name") or folder).strip(),
+            "dir": folder,
         })
-    return titel, sections
+    return title, sections
 
 
 def slugify(title: str) -> str:
     text = title.strip().lower()
-    for umlaut, ersatz in UMLAUTE.items():
-        text = text.replace(umlaut, ersatz)
+    for umlaut, replacement in UMLAUT_MAP.items():
+        text = text.replace(umlaut, replacement)
     text = unicodedata.normalize("NFKD", text)
     text = "".join(c for c in text if not unicodedata.combining(c))
     text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
-    return text or "eintrag"
+    return text or "entry"
 
 
 def parse_front_matter(raw: str) -> tuple[dict, list[str], str]:
-    """Trennt Frontmatter und Text.
+    """Splits front matter and text.
 
-    Rueckgabe: bekannte Felder, unveraenderte Restzeilen, Fliesstext.
+    Returns: known fields, untouched remaining lines, body text.
     """
     fields: dict[str, str | bool] = {}
     extra: list[str] = []
@@ -137,15 +137,15 @@ def parse_front_matter(raw: str) -> tuple[dict, list[str], str]:
     if not lines or lines[0].strip() != "---":
         return fields, extra, raw
 
-    # Erste Zeile, die nur aus --- besteht, schliesst den Frontmatter ab.
-    # Zeilenweise, damit --- im Fliesstext (z. B. im Codeblock) nichts abschneidet.
+    # The first line consisting only of --- closes the front matter.
+    # Line by line, so --- in the body (e.g. in a code block) cuts nothing off.
     try:
-        ende = next(i for i, line in enumerate(lines[1:], 1) if line.strip() == "---")
+        end = next(i for i, line in enumerate(lines[1:], 1) if line.strip() == "---")
     except StopIteration:
         return fields, extra, raw
 
-    head_lines = lines[1:ende]
-    body = "\n".join(lines[ende + 1:]).lstrip("\n")
+    head_lines = lines[1:end]
+    body = "\n".join(lines[end + 1:]).lstrip("\n")
 
     for line in head_lines:
         key, sep, value = line.partition(":")
@@ -163,8 +163,8 @@ def parse_front_matter(raw: str) -> tuple[dict, list[str], str]:
     return fields, extra, body
 
 
-def build_front_matter(title: str, datum: str, draft: bool, extra: list[str], body: str) -> str:
-    lines = ["---", f'title: "{title}"', f"date: {datum}"]
+def build_front_matter(title: str, day: str, draft: bool, extra: list[str], body: str) -> str:
+    lines = ["---", f'title: "{title}"', f"date: {day}"]
     if draft:
         lines.append("draft: true")
     lines.extend(extra)
@@ -173,169 +173,167 @@ def build_front_matter(title: str, datum: str, draft: bool, extra: list[str], bo
     return text.rstrip() + "\n"
 
 
-def hugo_bauen(site_dir: Path, hugo: str) -> dict:
-    """Baut die Seite neu.
+def run_hugo(site_dir: Path, hugo: str) -> dict:
+    """Rebuilds the site.
 
-    Hugo meldet Fehler ueber den Exit-Code und schreibt den Text nach stdout
-    (nicht stderr), mit "Error:" am Zeilenanfang. --quiet verschluckt ihn,
-    deshalb laeuft Hugo hier ohne.
+    Hugo reports errors through the exit code and writes the text to stdout
+    (not stderr), with "Error:" at the start of the line. --quiet swallows
+    it, so Hugo runs without it here.
 
-    --cleanDestinationDir ist noetig, damit ein geloeschter Beitrag auch aus
-    public/ verschwindet -- sonst bliebe seine Seite fuer Besucher erreichbar.
+    --cleanDestinationDir is needed so a deleted post also disappears from
+    public/ -- otherwise its page would stay reachable for visitors.
     """
     try:
-        lauf = subprocess.run(
+        proc = subprocess.run(
             [hugo, "--cleanDestinationDir"], cwd=site_dir,
             capture_output=True, text=True, timeout=BUILD_TIMEOUT,
         )
     except FileNotFoundError:
-        return {"ok": False, "meldung": f"Hugo nicht gefunden: {hugo}"}
+        return {"ok": False, "message": f"Hugo not found: {hugo}"}
     except subprocess.TimeoutExpired:
-        return {"ok": False, "meldung": f"Hugo antwortet seit {BUILD_TIMEOUT} s nicht."}
+        return {"ok": False, "message": f"Hugo has not responded for {BUILD_TIMEOUT} s."}
     except OSError as exc:
-        return {"ok": False, "meldung": f"Hugo liess sich nicht starten: {exc}"}
+        return {"ok": False, "message": f"Hugo could not be started: {exc}"}
 
-    if lauf.returncode == 0:
-        return {"ok": True, "meldung": ""}
+    if proc.returncode == 0:
+        return {"ok": True, "message": ""}
 
-    ausgabe = f"{lauf.stdout}\n{lauf.stderr}"
-    zeile = next((z for z in ausgabe.splitlines() if z.startswith("Error:")), "")
-    # Absolute Pfade kuerzen -- fuer den Kunden ist der Dateiname genug.
-    meldung = zeile.replace(f"{site_dir}/", "") or f"Hugo endete mit Code {lauf.returncode}."
-    return {"ok": False, "meldung": meldung, "ausgabe": ausgabe.strip()}
+    output = f"{proc.stdout}\n{proc.stderr}"
+    line = next((l for l in output.splitlines() if l.startswith("Error:")), "")
+    # Shorten absolute paths -- the file name is enough for the customer.
+    message = line.replace(f"{site_dir}/", "") or f"Hugo exited with code {proc.returncode}."
+    return {"ok": False, "message": message, "output": output.strip()}
 
 
-def git_lauf(repo: Path, args: list[str], timeout: int) -> subprocess.CompletedProcess:
-    # LC_ALL=C: sonst antwortet git in der Sprache des Servers, und Meldungen
-    # zu lesen wird zum Ratespiel.
+def run_git(repo: Path, args: list[str], timeout: int) -> subprocess.CompletedProcess:
+    # LC_ALL=C: otherwise git answers in the server's language, and reading
+    # its messages turns into guesswork.
     return subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True, timeout=timeout,
         env={**os.environ, "LC_ALL": "C"},
     )
 
 
-def erste_zeile(lauf: subprocess.CompletedProcess, ersatz: str) -> str:
-    """Die erste Zeile nennt den Grund; die letzte ist meist nur ein Nachsatz."""
-    for zeile in f"{lauf.stderr}\n{lauf.stdout}".splitlines():
-        if zeile.strip():
-            return zeile.strip()
-    return ersatz
+def first_line(proc: subprocess.CompletedProcess, fallback: str) -> str:
+    """The first line names the reason; the last one is usually just an afterthought."""
+    for line in f"{proc.stderr}\n{proc.stdout}".splitlines():
+        if line.strip():
+            return line.strip()
+    return fallback
 
 
 def git_repo(start: Path) -> Path | None:
-    """Wurzel des Repos, in dem die Inhalte liegen -- oder None."""
+    """Root of the repo that contains the content -- or None."""
     try:
-        lauf = git_lauf(start, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT)
+        proc = run_git(start, ["rev-parse", "--show-toplevel"], GIT_TIMEOUT)
     except FileNotFoundError:
-        raise SystemExit("--git ist gesetzt, aber git ist nicht installiert.")
+        raise SystemExit("--git is set, but git is not installed.")
     except (OSError, subprocess.SubprocessError):
         return None
-    return Path(lauf.stdout.strip()) if lauf.returncode == 0 else None
+    return Path(proc.stdout.strip()) if proc.returncode == 0 else None
 
 
-def git_commit(repo: Path, pfade: list[Path], nachricht: str,
+def git_commit(repo: Path, paths: list[Path], message: str,
                name: str, email: str) -> dict:
-    """Legt einen Commit an. Identitaet kommt mit, damit das Repo keine braucht."""
+    """Creates a commit. The identity is passed along so the repo needs none."""
     try:
-        git_lauf(repo, ["add", "--", *(str(p) for p in pfade)], GIT_TIMEOUT)
-        # Nichts vorgemerkt heisst: der Text war unveraendert. Das ueber den
-        # Rueckgabewert pruefen statt ueber den Meldungstext -- der haengt
-        # von der Sprache ab.
-        steht_an = git_lauf(repo, ["diff", "--cached", "--quiet", "--",
-                                   *(str(p) for p in pfade)], GIT_TIMEOUT)
-        if steht_an.returncode == 0:
-            return {"ok": True, "meldung": ""}
-        lauf = git_lauf(repo, [
+        run_git(repo, ["add", "--", *(str(p) for p in paths)], GIT_TIMEOUT)
+        # Nothing staged means the text was unchanged. Check that via the
+        # return code rather than the message text -- that depends on the
+        # language.
+        staged = run_git(repo, ["diff", "--cached", "--quiet", "--",
+                                *(str(p) for p in paths)], GIT_TIMEOUT)
+        if staged.returncode == 0:
+            return {"ok": True, "message": ""}
+        proc = run_git(repo, [
             "-c", f"user.name={name}", "-c", f"user.email={email}",
-            "commit", "-m", nachricht, "--", *(str(p) for p in pfade),
+            "commit", "-m", message, "--", *(str(p) for p in paths),
         ], GIT_TIMEOUT)
     except FileNotFoundError:
-        return {"ok": False, "meldung": "git nicht gefunden."}
+        return {"ok": False, "message": "git not found."}
     except subprocess.TimeoutExpired:
-        return {"ok": False, "meldung": f"git antwortet seit {GIT_TIMEOUT} s nicht."}
+        return {"ok": False, "message": f"git has not responded for {GIT_TIMEOUT} s."}
     except OSError as exc:
-        return {"ok": False, "meldung": f"git liess sich nicht starten: {exc}"}
+        return {"ok": False, "message": f"git could not be started: {exc}"}
 
-    if lauf.returncode == 0:
-        return {"ok": True, "meldung": ""}
-    return {"ok": False, "meldung": erste_zeile(
-        lauf, f"git commit endete mit Code {lauf.returncode}.")}
+    if proc.returncode == 0:
+        return {"ok": True, "message": ""}
+    return {"ok": False, "message": first_line(
+        proc, f"git commit exited with code {proc.returncode}.")}
 
 
 def git_push(repo: Path) -> dict:
     try:
-        lauf = git_lauf(repo, ["push"], PUSH_TIMEOUT)
+        proc = run_git(repo, ["push"], PUSH_TIMEOUT)
     except FileNotFoundError:
-        return {"ok": False, "meldung": "git nicht gefunden."}
+        return {"ok": False, "message": "git not found."}
     except subprocess.TimeoutExpired:
-        return {"ok": False, "meldung": f"Push seit {PUSH_TIMEOUT} s ohne Antwort."}
+        return {"ok": False, "message": f"Push got no response for {PUSH_TIMEOUT} s."}
     except OSError as exc:
-        return {"ok": False, "meldung": f"Push liess sich nicht starten: {exc}"}
-    if lauf.returncode == 0:
-        return {"ok": True, "meldung": ""}
-    return {"ok": False, "meldung": erste_zeile(lauf, "Push fehlgeschlagen.")}
+        return {"ok": False, "message": f"Push could not be started: {exc}"}
+    if proc.returncode == 0:
+        return {"ok": True, "message": ""}
+    return {"ok": False, "message": first_line(proc, "Push failed.")}
 
 
-def schreibe_atomar(path: Path, text: str) -> None:
-    """Erst daneben schreiben, dann umhaengen.
+def write_atomic(path: Path, text: str) -> None:
+    """Write next to the file first, then swap it in.
 
-    os.replace ist auf einem Dateisystem unteilbar. Ohne das koennte ein
-    gleichzeitiger Leser -- das Laden der Liste etwa -- eine halb
-    geschriebene Datei erwischen.
+    os.replace is atomic on a single filesystem. Without it, a concurrent
+    reader -- loading the list, for example -- could catch a half-written
+    file.
 
-    Der Zwischenname beginnt mit einem Punkt und endet nicht auf .md, faellt
-    also weder durch glob("*.md") noch Hugo auf.
+    The temporary name starts with a dot and does not end in .md, so neither
+    glob("*.md") nor Hugo picks it up.
     """
-    zwischen = path.with_name(f".{path.name}.tmp")
+    tmp = path.with_name(f".{path.name}.tmp")
     try:
-        zwischen.write_text(text, encoding="utf-8")
-        os.replace(zwischen, path)
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
     except BaseException:
-        zwischen.unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
         raise
 
 
-def bild_umwandeln(rohdaten: bytes) -> tuple[bytes, int, int]:
-    """Macht aus beliebigen Bilddaten ein verkleinertes WebP.
+def convert_image(raw: bytes) -> tuple[bytes, int, int]:
+    """Turns arbitrary image data into a downscaled WebP.
 
-    Das Neuberechnen ist zugleich die Pruefung: Was Pillow nicht als Bild
-    oeffnen kann, fliegt raus, und Verstecktes ueberlebt es nicht. Auch die
-    EXIF-Daten verschwinden dabei -- in Handyfotos steht dort oft der
-    Aufnahmeort.
+    Re-encoding doubles as the check: whatever Pillow cannot open as an image
+    is rejected, and anything hidden does not survive it. The EXIF data
+    disappears as well -- phone photos often contain the location there.
     """
     if Image is None:
-        raise PostError("Bild-Upload braucht Pillow (pip install Pillow).")
+        raise PostError("Image upload requires Pillow (pip install Pillow).")
     try:
-        bild = Image.open(io.BytesIO(rohdaten))
-        bild.load()
+        image = Image.open(io.BytesIO(raw))
+        image.load()
     except (UnidentifiedImageError, OSError, ValueError) as exc:
-        # Haeufigster echter Fall: HEIC vom iPhone, das Pillow ohne Zusatz
-        # nicht oeffnet. Der Rest sind kaputte oder untergeschobene Dateien.
+        # Most common real case: HEIC from an iPhone, which Pillow cannot open
+        # without an add-on. The rest are broken or smuggled-in files.
         raise PostError(
-            "Die Datei liess sich nicht als Bild oeffnen. Moeglich ist ein "
-            "nicht unterstuetztes Format wie HEIC von neueren iPhones -- "
-            "dann beim Export JPEG waehlen."
+            "The file could not be opened as an image. It may be an "
+            "unsupported format such as HEIC from newer iPhones -- "
+            "in that case choose JPEG when exporting."
         ) from exc
 
-    # Handyfotos stehen oft nur ueber ein EXIF-Feld richtig herum.
-    bild = ImageOps.exif_transpose(bild)
-    bild = bild.convert("RGBA" if "A" in bild.getbands() else "RGB")
-    bild.thumbnail((BILD_BREITE, BILD_BREITE), Image.LANCZOS)
+    # Phone photos are often only upright thanks to an EXIF field.
+    image = ImageOps.exif_transpose(image)
+    image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+    image.thumbnail((IMAGE_MAX_EDGE, IMAGE_MAX_EDGE), Image.LANCZOS)
 
-    ziel = io.BytesIO()
-    bild.save(ziel, "WEBP", quality=BILD_QUALITAET, method=4)
-    return ziel.getvalue(), bild.width, bild.height
+    out = io.BytesIO()
+    image.save(out, "WEBP", quality=IMAGE_QUALITY, method=4)
+    return out.getvalue(), image.width, image.height
 
 
 def read_entry(path: Path) -> dict:
     try:
         raw = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        # Kommt vor, wenn eine Datei am CMS vorbei angelegt wurde, etwa aus
-        # einem alten Editor in Latin-1.
+        # Happens when a file was created outside the CMS, e.g. by an old
+        # editor in Latin-1.
         raise PostError(
-            f"{path.name} ist nicht in UTF-8 gespeichert und laesst sich "
-            f"nicht lesen."
+            f"{path.name} is not saved as UTF-8 and cannot be read."
         ) from exc
     fields, _extra, body = parse_front_matter(raw)
     return {
@@ -347,63 +345,63 @@ def read_entry(path: Path) -> dict:
     }
 
 
-# Im Frontmatter steht der Titel als title: "...". Dort beendet " den Wert
-# vorzeitig, und \ leitet eine Escape-Sequenz ein (\b waere ein Steuerzeichen).
-TITEL_VERBOTEN = '"\\'
+# In the front matter the title is written as title: "...". There " ends the
+# value early, and \ starts an escape sequence (\b would be a control character).
+TITLE_FORBIDDEN = '"\\'
 
 
 def check_title(title: str) -> None:
-    """Titel muss in title: "..." passen, sonst bricht Hugos Frontmatter."""
+    """Title must fit into title: "...", otherwise Hugo's front matter breaks."""
     if not title:
-        raise PostError("Titel fehlt.")
-    schlecht = [zeichen for zeichen in TITEL_VERBOTEN if zeichen in title]
-    if schlecht:
-        hinweis = ' Stattdessen \u201e \u201c oder \u00bb \u00ab nehmen.' if '"' in title else ""
+        raise PostError("Title is missing.")
+    bad = [char for char in TITLE_FORBIDDEN if char in title]
+    if bad:
+        hint = ' Use “ ” or » « instead.' if '"' in title else ""
         raise PostError(
-            f'Titel darf kein {" und ".join(schlecht)} enthalten \u2014 Hugo kann '
-            f'den Frontmatter sonst nicht lesen.{hinweis}'
+            f'Title must not contain {" or ".join(bad)} — Hugo could not '
+            f'read the front matter otherwise.{hint}'
         )
 
 
 def payload_to_values(data: dict) -> tuple[str, str, bool, str]:
     title = str(data.get("title", "")).strip()
     check_title(title)
-    datum = str(data.get("date", "")).strip() or date.today().isoformat()
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", datum):
-        raise PostError("Datum muss im Format JJJJ-MM-TT stehen.")
-    return title, datum, bool(data.get("draft")), str(data.get("body", ""))
+    day = str(data.get("date", "")).strip() or date.today().isoformat()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+        raise PostError("Date must be in the format YYYY-MM-DD.")
+    return title, day, bool(data.get("draft")), str(data.get("body", ""))
 
 
 class CMSHandler(SimpleHTTPRequestHandler):
-    # Ein Prozess bedient eine Seite; main() setzt diese aus cms.toml.
+    # One process serves one site; main() sets these from cms.toml.
     content_dir: Path = DEFAULT_CONTENT_DIR
     sections: list[dict] = []
     site_title: str = "CMS"
-    site_dir: Path = DEFAULT_CONTENT_DIR.parent   # hier liegt hugo.toml
-    hugo: str | None = None                       # None = nicht bauen
-    repo: Path | None = None                      # None = nicht versionieren
+    site_dir: Path = DEFAULT_CONTENT_DIR.parent   # hugo.toml lives here
+    hugo: str | None = None                       # None = don't build
+    repo: Path | None = None                      # None = no versioning
     git_name: str = "CMS"
     git_email: str = "cms@localhost"
     push: bool = False
-    # Der Push laeuft nebenher; sein Ergebnis kommt mit der naechsten Antwort
-    # mit, damit eine klemmende Sicherung nicht unbemerkt bleibt.
-    letzter_push: dict | None = None
-    push_sperre = threading.Lock()
+    # The push runs in the background; its result rides along with the next
+    # response so a stuck backup does not go unnoticed.
+    last_push: dict | None = None
+    push_result_lock = threading.Lock()
 
-    # Schreiben, Bauen und Committen vertragen sich nicht nebenlaeufig:
-    # zwei Hugo-Laeufe raeumen einander public/ weg, zwei git-Commits
-    # streiten um index.lock, und free_path() koennte zweimal denselben
-    # Dateinamen vergeben. Lesende Anfragen laufen weiter frei.
-    schreib_sperre = threading.Lock()
-    # Laeuft schon ein Push, wird kein zweiter gestartet -- der laufende
-    # holt die neuen Commits in einer weiteren Runde mit.
-    push_lauf = threading.Lock()
-    push_nochmal = False
+    # Writing, building and committing don't mix concurrently: two Hugo runs
+    # wipe each other's public/, two git commits fight over index.lock, and
+    # free_path() could hand out the same file name twice. Read requests
+    # still run freely.
+    write_lock = threading.Lock()
+    # If a push is already running, no second one is started -- the running
+    # one picks up the new commits in another round.
+    push_running = threading.Lock()
+    push_again = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
-    # --- Hilfen -------------------------------------------------------
+    # --- Helpers ------------------------------------------------------
     def send_json(self, data, status: int = 200) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -413,160 +411,160 @@ class CMSHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_json(self) -> dict:
-        # Ein fremdes <form> kann nur text/plain und Formulardaten schicken.
-        # application/json erzwingt beim Browser eine Rueckfrage (CORS), die
-        # dieser Server nie beantwortet -- so kommt nichts Fremdes durch.
-        art = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        if art != "application/json":
-            raise PostError("Anfrage muss application/json sein.")
+        # A foreign <form> can only send text/plain and form data.
+        # application/json forces the browser into a CORS preflight that this
+        # server never answers -- so nothing foreign gets through.
+        kind = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if kind != "application/json":
+            raise PostError("Request must be application/json.")
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
-            raise PostError("Leere Anfrage.")
+            raise PostError("Empty request.")
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise PostError(f"Ungueltiges JSON: {exc}") from exc
+            raise PostError(f"Invalid JSON: {exc}") from exc
 
     def section(self, section_id: str) -> dict:
-        for eintrag in self.sections:
-            if eintrag["id"] == section_id:
-                return eintrag
-        raise FileNotFoundError(f"Sektion nicht gefunden: {section_id}")
+        for entry in self.sections:
+            if entry["id"] == section_id:
+                return entry
+        raise FileNotFoundError(f"Section not found: {section_id}")
 
     def section_dir(self, section_id: str) -> Path:
-        ordner = self.section(section_id)["dir"]
-        if not SAFE_DIR.fullmatch(ordner):
-            raise PostError(f"Unzulaessiger Ordnername: {ordner}")
-        path = (self.content_dir / ordner).resolve()
+        folder = self.section(section_id)["dir"]
+        if not SAFE_DIR.fullmatch(folder):
+            raise PostError(f"Invalid folder name: {folder}")
+        path = (self.content_dir / folder).resolve()
         if path.parent != self.content_dir.resolve():
-            raise PostError("Ordner liegt ausserhalb von content/.")
+            raise PostError("Folder is outside of content/.")
         if not path.is_dir():
-            raise PostError(f"Ordner fehlt: content/{ordner}/")
+            raise PostError(f"Folder missing: content/{folder}/")
         return path
 
     def entry_path(self, section_id: str, name: str) -> Path:
         if name in RESERVED or not SAFE_NAME.fullmatch(name):
-            raise PostError(f"Unzulaessiger Dateiname: {name}")
-        ordner = self.section_dir(section_id)
-        path = (ordner / name).resolve()
-        if path.parent != ordner:
-            raise PostError("Pfad liegt ausserhalb des Sektionsordners.")
+            raise PostError(f"Invalid file name: {name}")
+        folder = self.section_dir(section_id)
+        path = (folder / name).resolve()
+        if path.parent != folder:
+            raise PostError("Path is outside of the section folder.")
         return path
 
-    def upload_dir(self, jahr: str) -> Path:
-        ordner = (self.site_dir / "static" / UPLOAD_DIR / jahr).resolve()
-        if not ordner.is_relative_to((self.site_dir / "static").resolve()):
-            raise PostError("Ordner liegt ausserhalb von static/.")
-        return ordner
+    def upload_dir(self, year: str) -> Path:
+        folder = (self.site_dir / "static" / UPLOAD_DIR / year).resolve()
+        if not folder.is_relative_to((self.site_dir / "static").resolve()):
+            raise PostError("Folder is outside of static/.")
+        return folder
 
-    def upload_entgegennehmen(self) -> None:
-        art = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        # Ein fremdes <form> kann kein image/* schicken -- das ist der Schutz
-        # davor, dass eine andere Webseite hier heimlich etwas ablegt.
-        if not art.startswith("image/"):
-            raise PostError("Anfrage muss ein Bild sein (Content-Type image/...).")
+    def receive_upload(self) -> None:
+        kind = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        # A foreign <form> cannot send image/* -- that is what stops another
+        # website from quietly dropping something here.
+        if not kind.startswith("image/"):
+            raise PostError("Request must be an image (Content-Type image/...).")
 
-        laenge = int(self.headers.get("Content-Length") or 0)
-        if laenge <= 0:
-            raise PostError("Leere Anfrage.")
-        if laenge > UPLOAD_MAX_BYTES:
-            raise PostError(f"Bild ist groesser als {UPLOAD_MAX_BYTES // 1024 // 1024} MB.")
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise PostError("Empty request.")
+        if length > UPLOAD_MAX_BYTES:
+            raise PostError(f"Image is larger than {UPLOAD_MAX_BYTES // 1024 // 1024} MB.")
 
-        rohdaten = self.rfile.read(laenge)
-        webp, breite, hoehe = bild_umwandeln(rohdaten)
+        raw = self.rfile.read(length)
+        webp, width, height = convert_image(raw)
 
-        # Der Name kommt URL-kodiert im Header, damit auch Umlaute ankommen.
-        roh_name = unquote(self.headers.get("X-Dateiname") or "bild")
-        stamm = slugify(Path(roh_name).stem) or "bild"
-        jahr = date.today().strftime("%Y")
+        # The name arrives URL-encoded in the header so umlauts survive.
+        raw_name = unquote(self.headers.get("X-Filename") or "image")
+        stem = slugify(Path(raw_name).stem) or "image"
+        year = date.today().strftime("%Y")
 
-        with CMSHandler.schreib_sperre:
-            ordner = self.upload_dir(jahr)
-            ordner.mkdir(parents=True, exist_ok=True)
-            ziel = ordner / f"{stamm}.webp"
-            zaehler = 2
-            while ziel.exists():
-                ziel = ordner / f"{stamm}-{zaehler}.webp"
-                zaehler += 1
-            ziel.write_bytes(webp)
-            self.log_message("Bild: %s (%d KB, %dx%d)", ziel.name,
-                             len(webp) // 1024, breite, hoehe)
-            antwort = {
-                "url": f"/{UPLOAD_DIR}/{jahr}/{ziel.name}",
-                "breite": breite, "hoehe": hoehe, "bytes": len(webp),
-                "build": self.bauen(),
-                "git": self.sichern(f"Bild {ziel.name} hinzugefuegt", [ziel]),
+        with CMSHandler.write_lock:
+            folder = self.upload_dir(year)
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / f"{stem}.webp"
+            counter = 2
+            while target.exists():
+                target = folder / f"{stem}-{counter}.webp"
+                counter += 1
+            target.write_bytes(webp)
+            self.log_message("image: %s (%d KB, %dx%d)", target.name,
+                             len(webp) // 1024, width, height)
+            response = {
+                "url": f"/{UPLOAD_DIR}/{year}/{target.name}",
+                "width": width, "height": height, "bytes": len(webp),
+                "build": self.build(),
+                "git": self.save_to_git(f"Add image {target.name}", [target]),
             }
-        self.send_json(antwort, 201)
+        self.send_json(response, 201)
 
-    def upload_ausliefern(self, jahr: str, name: str) -> None:
-        """Damit das Bild schon in der Vorschau erscheint, bevor Hugo es kopiert."""
-        pfad = (self.upload_dir(jahr) / name).resolve()
-        if pfad.parent != self.upload_dir(jahr) or not pfad.is_file():
-            raise FileNotFoundError(f"Bild nicht gefunden: {jahr}/{name}")
-        daten = pfad.read_bytes()
+    def serve_upload(self, year: str, name: str) -> None:
+        """So the image already shows in the preview before Hugo copies it."""
+        path = (self.upload_dir(year) / name).resolve()
+        if path.parent != self.upload_dir(year) or not path.is_file():
+            raise FileNotFoundError(f"Image not found: {year}/{name}")
+        data = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", "image/webp")
-        self.send_header("Content-Length", str(len(daten)))
+        self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(daten)
+        self.wfile.write(data)
 
-    def bauen(self) -> dict:
-        """Seite neu erzeugen und das Ergebnis fuer die Antwort aufbereiten."""
+    def build(self) -> dict:
+        """Rebuild the site and prepare the result for the response."""
         if self.hugo is None:
-            return {"ok": True, "aus": True, "meldung": ""}
-        ergebnis = hugo_bauen(self.site_dir, self.hugo)
-        if not ergebnis["ok"]:
-            # Vollen Text ins Protokoll, in die Oberflaeche nur die eine Zeile.
-            self.log_message("Build fehlgeschlagen: %s", ergebnis.get("ausgabe", ""))
-        ergebnis.pop("ausgabe", None)
-        return ergebnis
+            return {"ok": True, "off": True, "message": ""}
+        result = run_hugo(self.site_dir, self.hugo)
+        if not result["ok"]:
+            # Full text to the log, only the one line to the UI.
+            self.log_message("build failed: %s", result.get("output", ""))
+        result.pop("output", None)
+        return result
 
-    def sichern(self, nachricht: str, pfade: list[Path]) -> dict | None:
-        """Commit sofort, Push nebenher. Gibt None zurueck, wenn abgeschaltet."""
+    def save_to_git(self, message: str, paths: list[Path]) -> dict | None:
+        """Commit right away, push in the background. Returns None if disabled."""
         if self.repo is None:
             return None
 
-        ergebnis = git_commit(self.repo, pfade, nachricht,
-                              self.git_name, self.git_email)
-        if not ergebnis["ok"]:
-            self.log_error("Commit fehlgeschlagen: %s", ergebnis["meldung"])
+        result = git_commit(self.repo, paths, message,
+                            self.git_name, self.git_email)
+        if not result["ok"]:
+            self.log_error("commit failed: %s", result["message"])
         elif self.push:
-            threading.Thread(target=self.push_nebenher, daemon=True).start()
+            threading.Thread(target=self.push_in_background, daemon=True).start()
 
-        # Was der letzte Push gemeldet hat, faehrt hier mit.
-        with CMSHandler.push_sperre:
-            if CMSHandler.letzter_push is not None:
-                ergebnis["push"] = CMSHandler.letzter_push
-        return ergebnis
+        # Whatever the last push reported rides along here.
+        with CMSHandler.push_result_lock:
+            if CMSHandler.last_push is not None:
+                result["push"] = CMSHandler.last_push
+        return result
 
-    def push_nebenher(self) -> None:
-        if not CMSHandler.push_lauf.acquire(blocking=False):
-            CMSHandler.push_nochmal = True   # laeuft schon, der nimmt es mit
+    def push_in_background(self) -> None:
+        if not CMSHandler.push_running.acquire(blocking=False):
+            CMSHandler.push_again = True   # already running, it will take this along
             return
         try:
             while True:
-                CMSHandler.push_nochmal = False
-                ergebnis = git_push(self.repo)
-                if not ergebnis["ok"]:
-                    self.log_error("Push fehlgeschlagen: %s", ergebnis["meldung"])
-                with CMSHandler.push_sperre:
-                    # Ein gelungener Push loescht die alte Klage wieder.
-                    CMSHandler.letzter_push = None if ergebnis["ok"] else ergebnis
-                if not CMSHandler.push_nochmal:
+                CMSHandler.push_again = False
+                result = git_push(self.repo)
+                if not result["ok"]:
+                    self.log_error("push failed: %s", result["message"])
+                with CMSHandler.push_result_lock:
+                    # A successful push clears the old complaint again.
+                    CMSHandler.last_push = None if result["ok"] else result
+                if not CMSHandler.push_again:
                     return
         finally:
-            CMSHandler.push_lauf.release()
+            CMSHandler.push_running.release()
 
     def free_path(self, section_id: str, slug: str) -> Path:
         candidate = self.entry_path(section_id, f"{slug}.md")
-        zaehler = 2
+        counter = 2
         while candidate.exists():
-            candidate = self.entry_path(section_id, f"{slug}-{zaehler}.md")
-            zaehler += 1
+            candidate = self.entry_path(section_id, f"{slug}-{counter}.md")
+            counter += 1
         return candidate
 
-    # --- Routen -------------------------------------------------------
+    # --- Routes -------------------------------------------------------
     def do_GET(self) -> None:
         if self.path == "/api/site":
             self.guard(lambda: self.send_json({"title": self.site_title}))
@@ -574,208 +572,208 @@ class CMSHandler(SimpleHTTPRequestHandler):
         if self.path == "/api/sections":
             self.guard(lambda: self.send_json(self.list_sections()))
             return
-        treffer = ENTRIES_ROUTE.fullmatch(self.path)
-        if treffer:
-            section_id, name = treffer.groups()
+        match = ENTRIES_ROUTE.fullmatch(self.path)
+        if match:
+            section_id, name = match.groups()
             if name:
                 self.guard(lambda: self.send_json(self.show_entry(section_id, name)))
             else:
                 self.guard(lambda: self.send_json(self.list_entries(section_id)))
             return
-        treffer = UPLOAD_ROUTE.fullmatch(self.path)
-        if treffer:
-            self.guard(lambda: self.upload_ausliefern(*treffer.groups()))
+        match = UPLOAD_ROUTE.fullmatch(self.path)
+        if match:
+            self.guard(lambda: self.serve_upload(*match.groups()))
             return
         if self.path.startswith("/api/"):
-            self.send_json({"error": "Unbekannte Route."}, 404)
+            self.send_json({"error": "Unknown route."}, 404)
             return
         super().do_GET()
 
     def do_POST(self) -> None:
         if self.path == "/api/uploads":
-            self.guard(self.upload_entgegennehmen)
+            self.guard(self.receive_upload)
             return
-        treffer = ENTRIES_ROUTE.fullmatch(self.path)
-        if treffer and not treffer.group(2):
-            self.guard(lambda: self.create_entry(treffer.group(1)))
+        match = ENTRIES_ROUTE.fullmatch(self.path)
+        if match and not match.group(2):
+            self.guard(lambda: self.create_entry(match.group(1)))
             return
-        self.send_json({"error": "Unbekannte Route."}, 404)
+        self.send_json({"error": "Unknown route."}, 404)
 
     def do_PUT(self) -> None:
-        treffer = ENTRIES_ROUTE.fullmatch(self.path)
-        if treffer and treffer.group(2):
-            self.guard(lambda: self.update_entry(treffer.group(1), treffer.group(2)))
+        match = ENTRIES_ROUTE.fullmatch(self.path)
+        if match and match.group(2):
+            self.guard(lambda: self.update_entry(match.group(1), match.group(2)))
             return
-        self.send_json({"error": "Unbekannte Route."}, 404)
+        self.send_json({"error": "Unknown route."}, 404)
 
     def do_DELETE(self) -> None:
-        treffer = ENTRIES_ROUTE.fullmatch(self.path)
-        if treffer and treffer.group(2):
-            self.guard(lambda: self.delete_entry(treffer.group(1), treffer.group(2)))
+        match = ENTRIES_ROUTE.fullmatch(self.path)
+        if match and match.group(2):
+            self.guard(lambda: self.delete_entry(match.group(1), match.group(2)))
             return
-        self.send_json({"error": "Unbekannte Route."}, 404)
+        self.send_json({"error": "Unknown route."}, 404)
 
-    # --- Aktionen -----------------------------------------------------
+    # --- Actions ------------------------------------------------------
     def list_sections(self) -> list[dict]:
-        liste = []
-        for eintrag in self.sections:
-            daten = dict(eintrag)
+        result = []
+        for entry in self.sections:
+            data = dict(entry)
             try:
-                daten["count"] = len(self.entry_paths(eintrag["id"]))
+                data["count"] = len(self.entry_paths(entry["id"]))
             except PostError:
-                # Ordner fehlt in Hugo: Sektion trotzdem zeigen, aber markiert.
-                daten["count"] = 0
-                daten["missing"] = True
-            liste.append(daten)
-        return liste
+                # Folder missing in Hugo: still show the section, but flagged.
+                data["count"] = 0
+                data["missing"] = True
+            result.append(data)
+        return result
 
     def entry_paths(self, section_id: str) -> list[Path]:
-        ordner = self.section_dir(section_id)
-        return [p for p in sorted(ordner.glob("*.md")) if p.name not in RESERVED]
+        folder = self.section_dir(section_id)
+        return [p for p in sorted(folder.glob("*.md")) if p.name not in RESERVED]
 
     def list_entries(self, section_id: str) -> list[dict]:
-        eintraege = []
+        entries = []
         for path in self.entry_paths(section_id):
             try:
-                eintrag = read_entry(path)
-                eintrag.pop("body")
+                entry = read_entry(path)
+                entry.pop("body")
             except PostError as exc:
-                # Eine unlesbare Datei darf nicht die ganze Sektion lahmlegen:
-                # der Rest bleibt bedienbar, diese eine wird markiert.
-                self.log_message("unlesbar: %s (%s)", path.name, exc)
-                eintrag = {"file": path.name, "title": path.name, "date": "",
-                           "draft": False, "fehler": str(exc)}
-            eintraege.append(eintrag)
-        eintraege.sort(key=lambda e: (e["date"], e["file"]), reverse=True)
-        return eintraege
+                # One unreadable file must not take down the whole section:
+                # the rest stays usable, this one gets flagged.
+                self.log_message("unreadable: %s (%s)", path.name, exc)
+                entry = {"file": path.name, "title": path.name, "date": "",
+                         "draft": False, "error": str(exc)}
+            entries.append(entry)
+        entries.sort(key=lambda e: (e["date"], e["file"]), reverse=True)
+        return entries
 
     def show_entry(self, section_id: str, name: str) -> dict:
         path = self.entry_path(section_id, name)
         if not path.exists():
-            raise FileNotFoundError(f"Eintrag nicht gefunden: {section_id}/{name}")
+            raise FileNotFoundError(f"Entry not found: {section_id}/{name}")
         return read_entry(path)
 
     def create_entry(self, section_id: str) -> None:
-        title, datum, draft, body = payload_to_values(self.read_json())
-        with CMSHandler.schreib_sperre:
-            self.create_entry_gesperrt(section_id, title, datum, draft, body)
+        title, day, draft, body = payload_to_values(self.read_json())
+        with CMSHandler.write_lock:
+            self.create_entry_locked(section_id, title, day, draft, body)
 
-    def create_entry_gesperrt(self, section_id: str, title: str, datum: str,
-                              draft: bool, body: str) -> None:
+    def create_entry_locked(self, section_id: str, title: str, day: str,
+                            draft: bool, body: str) -> None:
         path = self.free_path(section_id, slugify(title))
-        schreibe_atomar(path, build_front_matter(title, datum, draft, [], body))
-        self.log_message("angelegt: %s/%s", section_id, path.name)
-        antwort = read_entry(path)
-        antwort["build"] = self.bauen()
-        antwort["git"] = self.sichern(f'"{title}" angelegt', [path])
-        self.send_json(antwort, 201)
+        write_atomic(path, build_front_matter(title, day, draft, [], body))
+        self.log_message("created: %s/%s", section_id, path.name)
+        response = read_entry(path)
+        response["build"] = self.build()
+        response["git"] = self.save_to_git(f'Create "{title}"', [path])
+        self.send_json(response, 201)
 
     def update_entry(self, section_id: str, name: str) -> None:
-        title, datum, draft, body = payload_to_values(self.read_json())
-        with CMSHandler.schreib_sperre:
-            self.update_entry_gesperrt(section_id, name, title, datum, draft, body)
+        title, day, draft, body = payload_to_values(self.read_json())
+        with CMSHandler.write_lock:
+            self.update_entry_locked(section_id, name, title, day, draft, body)
 
-    def update_entry_gesperrt(self, section_id: str, name: str, title: str,
-                              datum: str, draft: bool, body: str) -> None:
+    def update_entry_locked(self, section_id: str, name: str, title: str,
+                            day: str, draft: bool, body: str) -> None:
         path = self.entry_path(section_id, name)
         if not path.exists():
-            raise FileNotFoundError(f"Eintrag nicht gefunden: {section_id}/{name}")
+            raise FileNotFoundError(f"Entry not found: {section_id}/{name}")
         _fields, extra, _body = parse_front_matter(path.read_text(encoding="utf-8"))
-        schreibe_atomar(path, build_front_matter(title, datum, draft, extra, body))
-        self.log_message("gespeichert: %s/%s", section_id, path.name)
-        antwort = read_entry(path)
-        antwort["build"] = self.bauen()
-        antwort["git"] = self.sichern(f'"{title}" bearbeitet', [path])
-        self.send_json(antwort)
+        write_atomic(path, build_front_matter(title, day, draft, extra, body))
+        self.log_message("saved: %s/%s", section_id, path.name)
+        response = read_entry(path)
+        response["build"] = self.build()
+        response["git"] = self.save_to_git(f'Edit "{title}"', [path])
+        self.send_json(response)
 
     def delete_entry(self, section_id: str, name: str) -> None:
-        with CMSHandler.schreib_sperre:
-            self.delete_entry_gesperrt(section_id, name)
+        with CMSHandler.write_lock:
+            self.delete_entry_locked(section_id, name)
 
-    def delete_entry_gesperrt(self, section_id: str, name: str) -> None:
-        # entry_path haelt _index.md und Pfade ausserhalb der Sektion fern.
+    def delete_entry_locked(self, section_id: str, name: str) -> None:
+        # entry_path keeps _index.md and paths outside the section away.
         path = self.entry_path(section_id, name)
         if not path.exists():
-            raise FileNotFoundError(f"Eintrag nicht gefunden: {section_id}/{name}")
+            raise FileNotFoundError(f"Entry not found: {section_id}/{name}")
         path.unlink()
-        self.log_message("geloescht: %s/%s", section_id, path.name)
+        self.log_message("deleted: %s/%s", section_id, path.name)
         self.send_json({
             "file": path.name, "deleted": True,
-            "build": self.bauen(),
-            "git": self.sichern(f"{path.name} geloescht", [path]),
+            "build": self.build(),
+            "git": self.save_to_git(f"Delete {path.name}", [path]),
         })
 
-    def guard(self, aktion) -> None:
-        """Fuehrt eine Route aus und uebersetzt Fehler in JSON-Antworten."""
+    def guard(self, action) -> None:
+        """Runs a route and translates errors into JSON responses."""
         try:
-            aktion()
+            action()
         except PostError as exc:
             self.send_json({"error": str(exc)}, 400)
         except FileNotFoundError as exc:
             self.send_json({"error": str(exc)}, 404)
         except OSError as exc:
-            self.send_json({"error": f"Dateifehler: {exc}"}, 500)
+            self.send_json({"error": f"File error: {exc}"}, 500)
         except Exception:
-            # Letztes Netz: ohne das bricht die Verbindung ohne Antwort ab,
-            # und die Oberflaeche zeigt nur "Failed to fetch".
-            self.log_error("Unerwarteter Fehler:\n%s", traceback.format_exc())
-            self.send_json({"error": "Unerwarteter Fehler im Server. "
-                                     "Einzelheiten stehen im Protokoll."}, 500)
+            # Last safety net: without it the connection drops without a
+            # response, and the UI only shows "Failed to fetch".
+            self.log_error("unexpected error:\n%s", traceback.format_exc())
+            self.send_json({"error": "Unexpected server error. "
+                                     "Details are in the log."}, 500)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="CMS fuer die Hugo-Inhalte")
+    parser = argparse.ArgumentParser(description="CMS for the Hugo content")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--content", type=Path, default=DEFAULT_CONTENT_DIR,
-                        help="content-Ordner der Hugo-Seite")
+                        help="content folder of the Hugo site")
     parser.add_argument("--config", type=Path, default=None,
-                        help=f"{CONFIG_NAME} der Seite (Vorgabe: neben content/)")
+                        help=f"{CONFIG_NAME} of the site (default: next to content/)")
     parser.add_argument("--hugo", default="hugo",
-                        help="Hugo-Programm fuer den Build nach dem Speichern")
-    parser.add_argument("--kein-build", action="store_true",
-                        help="nach dem Speichern nicht bauen (z. B. wenn "
-                             "'hugo server' schon laeuft)")
+                        help="Hugo binary for the build after saving")
+    parser.add_argument("--no-build", action="store_true",
+                        help="don't build after saving (e.g. when "
+                             "'hugo server' is already running)")
     parser.add_argument("--git", action="store_true",
-                        help="jede Aenderung als Commit festhalten")
+                        help="record every change as a commit")
     parser.add_argument("--push", action="store_true",
-                        help="nach dem Commit nebenher pushen (braucht --git "
-                             "und einen eingerichteten remote)")
+                        help="push in the background after each commit (requires "
+                             "--git and a configured remote)")
     parser.add_argument("--git-name", default="CMS",
-                        help="Name im Commit (Vorgabe: CMS)")
+                        help="name in the commit (default: CMS)")
     parser.add_argument("--git-email", default="cms@localhost",
-                        help="E-Mail im Commit (Vorgabe: cms@localhost)")
+                        help="email in the commit (default: cms@localhost)")
     args = parser.parse_args()
 
     content_dir = args.content.resolve()
     if not content_dir.is_dir():
-        raise SystemExit(f"content-Ordner nicht gefunden: {content_dir}")
+        raise SystemExit(f"content folder not found: {content_dir}")
 
     config_path = (args.config or content_dir.parent / CONFIG_NAME).resolve()
     CMSHandler.site_title, CMSHandler.sections = load_config(config_path)
     CMSHandler.content_dir = content_dir
     CMSHandler.site_dir = content_dir.parent
 
-    # Lieber beim Start meckern als beim ersten Speichern des Kunden.
-    if args.kein_build:
+    # Better to complain at startup than on the customer's first save.
+    if args.no_build:
         CMSHandler.hugo = None
     else:
-        gefunden = shutil.which(args.hugo)
-        if gefunden is None:
+        found = shutil.which(args.hugo)
+        if found is None:
             raise SystemExit(
-                f"Hugo nicht gefunden: {args.hugo}\n"
-                f"  Pfad angeben mit --hugo, oder den Build mit --kein-build abschalten."
+                f"Hugo not found: {args.hugo}\n"
+                f"  Give the path with --hugo, or turn off the build with --no-build."
             )
-        CMSHandler.hugo = gefunden
+        CMSHandler.hugo = found
 
     if args.push and not args.git:
-        raise SystemExit("--push braucht --git.")
+        raise SystemExit("--push requires --git.")
     if args.git:
         repo = git_repo(content_dir)
         if repo is None:
             raise SystemExit(
-                f"Kein Git-Repo ueber {content_dir}.\n"
-                f"  Mit 'git init' eines anlegen oder --git weglassen."
+                f"No git repo above {content_dir}.\n"
+                f"  Create one with 'git init' or leave out --git."
             )
         CMSHandler.repo = repo
         CMSHandler.git_name = args.git_name
@@ -783,24 +781,24 @@ def main() -> None:
         CMSHandler.push = args.push
 
     server = ThreadingHTTPServer((args.host, args.port), CMSHandler)
-    server.daemon_threads = True   # beim Beenden nicht auf offene Verbindungen warten
-    print(f"CMS laeuft auf http://{args.host}:{args.port}")
-    print(f"Seite:  {CMSHandler.site_title}")
-    print(f"Konfig: {config_path}")
-    print(f"Inhalte: {content_dir}")
-    print(f"Build:  {CMSHandler.hugo or 'aus (--kein-build)'}")
+    server.daemon_threads = True   # don't wait for open connections on shutdown
+    print(f"CMS running at http://{args.host}:{args.port}")
+    print(f"Site:    {CMSHandler.site_title}")
+    print(f"Config:  {config_path}")
+    print(f"Content: {content_dir}")
+    print(f"Build:   {CMSHandler.hugo or 'off (--no-build)'}")
     if CMSHandler.repo is None:
-        print("Git:    aus")
+        print("Git:     off")
     else:
-        print(f"Git:    {CMSHandler.repo}"
-              f"{'  (mit Push)' if CMSHandler.push else '  (nur lokal)'}")
-    for eintrag in CMSHandler.sections:
-        zeichen = "" if (content_dir / eintrag["dir"]).is_dir() else "  (Ordner fehlt!)"
-        print(f"  {eintrag['name']} -> {eintrag['dir']}/{zeichen}")
+        print(f"Git:     {CMSHandler.repo}"
+              f"{'  (with push)' if CMSHandler.push else '  (local only)'}")
+    for entry in CMSHandler.sections:
+        flag = "" if (content_dir / entry["dir"]).is_dir() else "  (folder missing!)"
+        print(f"  {entry['name']} -> {entry['dir']}/{flag}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nBeendet.")
+        print("\nStopped.")
 
 
 if __name__ == "__main__":
