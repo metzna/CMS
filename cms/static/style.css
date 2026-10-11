@@ -218,6 +218,8 @@ textarea {
   resize: none;
 }
 textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+textarea.ablegen { outline: 2px dashed var(--accent); outline-offset: -1px; }
+.preview img { max-width: 100%; height: auto; border-radius: 4px; }
 
 .preview {
   flex: 1;

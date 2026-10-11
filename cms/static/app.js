@@ -15,6 +15,8 @@ const deleteBtn = document.getElementById("delete");
 const bauEl = document.getElementById("bau");
 const saveBtn = document.getElementById("save");
 const neuBtn = document.getElementById("new-post");
+const bildBtn = document.getElementById("bild");
+const bildInput = document.getElementById("bilddatei");
 const sectionEl = document.getElementById("section");
 const themeBtn = document.getElementById("theme");
 
@@ -63,6 +65,7 @@ function escapeHtml(text) {
 function inline(text) {
   return text
     .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img src="$2" alt="$1">')
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
     .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" rel="noreferrer">$1</a>');
@@ -170,7 +173,7 @@ let amArbeiten = false;
 
 function sperren(ja) {
   amArbeiten = ja;
-  for (const el of [saveBtn, deleteBtn, neuBtn, sectionEl]) el.disabled = ja;
+  for (const el of [saveBtn, deleteBtn, neuBtn, bildBtn, sectionEl]) el.disabled = ja;
   for (const btn of listEl.querySelectorAll("button")) btn.disabled = ja;
 }
 
@@ -420,6 +423,49 @@ async function loeschen() {
   }
 }
 
+/* --- Bilder ----------------------------------------------------------- */
+
+function bildEinfuegen(url) {
+  const beschreibung = "Bildbeschreibung";
+  const marke = `![${beschreibung}](${url})`;
+  const start = bodyEl.selectionStart;
+  const ende = bodyEl.selectionEnd;
+  bodyEl.value = bodyEl.value.slice(0, start) + marke + bodyEl.value.slice(ende);
+  // Den Platzhalter gleich markieren, damit er ueberschrieben werden kann.
+  bodyEl.focus();
+  bodyEl.setSelectionRange(start + 2, start + 2 + beschreibung.length);
+  vorschauAktualisieren();
+}
+
+async function bildHochladen(datei) {
+  if (amArbeiten || !datei) return;
+  if (!datei.type.startsWith("image/")) {
+    melde("Das ist keine Bilddatei.", true);
+    return;
+  }
+  sperren(true);
+  bauStand("laeuft");
+  try {
+    const antwort = await api("/api/uploads", {
+      method: "POST",
+      headers: {
+        "Content-Type": datei.type,
+        "X-Dateiname": encodeURIComponent(datei.name),
+      },
+      body: datei,
+    });
+    bildEinfuegen(antwort.url);
+    const kb = Math.round(antwort.bytes / 1024);
+    const text = `Bild eingef\u00fcgt: ${antwort.breite}\u00d7${antwort.hoehe}, ${kb} KB`;
+    bauStand(bauMelden(antwort, text, "Bild gespeichert") ? "fertig" : "fehler");
+  } catch (fehler) {
+    bauStand("");
+    melde(fehler.message, true);
+  } finally {
+    sperren(false);
+  }
+}
+
 /* --- Ereignisse ------------------------------------------------------- */
 
 async function zaehlerAuffrischen() {
@@ -442,6 +488,24 @@ sectionEl.addEventListener("change", sektionWechseln);
 neuBtn.addEventListener("click", neuerBeitrag);
 formEl.addEventListener("submit", speichern);
 bodyEl.addEventListener("input", vorschauAktualisieren);
+
+bildBtn.addEventListener("click", () => bildInput.click());
+bildInput.addEventListener("change", () => {
+  bildHochladen(bildInput.files[0]);
+  bildInput.value = "";   // sonst loest dieselbe Datei kein zweites Mal aus
+});
+
+// Bild ins Textfeld ziehen geht auch.
+bodyEl.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  bodyEl.classList.add("ablegen");
+});
+bodyEl.addEventListener("dragleave", () => bodyEl.classList.remove("ablegen"));
+bodyEl.addEventListener("drop", (event) => {
+  event.preventDefault();
+  bodyEl.classList.remove("ablegen");
+  bildHochladen(event.dataTransfer.files[0]);
+});
 
 previewBtn.addEventListener("click", () => {
   previewEl.hidden = !previewEl.hidden;

@@ -9,6 +9,7 @@ Start:  python3 cms/server.py
 """
 
 import argparse
+import io
 import json
 import os
 import re
@@ -21,6 +22,12 @@ import unicodedata
 from datetime import date
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import unquote
+
+try:
+    from PIL import Image, ImageOps, UnidentifiedImageError
+except ImportError:          # ohne Pillow laeuft alles ausser dem Bild-Upload
+    Image = None
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -42,6 +49,14 @@ PUSH_TIMEOUT = 120
 SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\.md$")
 SAFE_DIR = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 RESERVED = {"_index.md", "index.md"}
+
+# Bilder: hochgeladen wird in static/uploads/<jahr>/, ausgeliefert unter /uploads/.
+# static/ kopiert Hugo unveraendert, das Bild ist also ohne Zutun auf der Seite.
+UPLOAD_DIR = "uploads"
+UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+BILD_BREITE = 2000          # laengere Kante, reicht fuer jeden Bildschirm
+BILD_QUALITAET = 80         # daraus werden aus 1,1 MB rund 200 KB
+UPLOAD_ROUTE = re.compile(r"^/uploads/(\d{4})/([a-z0-9][a-z0-9._-]*\.webp)$")
 
 # /api/sections/<id>/entries[/<datei>]
 ENTRIES_ROUTE = re.compile(r"^/api/sections/([a-z0-9][a-z0-9_-]*)/entries(?:/([^/]+))?$")
@@ -280,6 +295,38 @@ def schreibe_atomar(path: Path, text: str) -> None:
         raise
 
 
+def bild_umwandeln(rohdaten: bytes) -> tuple[bytes, int, int]:
+    """Macht aus beliebigen Bilddaten ein verkleinertes WebP.
+
+    Das Neuberechnen ist zugleich die Pruefung: Was Pillow nicht als Bild
+    oeffnen kann, fliegt raus, und Verstecktes ueberlebt es nicht. Auch die
+    EXIF-Daten verschwinden dabei -- in Handyfotos steht dort oft der
+    Aufnahmeort.
+    """
+    if Image is None:
+        raise PostError("Bild-Upload braucht Pillow (pip install Pillow).")
+    try:
+        bild = Image.open(io.BytesIO(rohdaten))
+        bild.load()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        # Haeufigster echter Fall: HEIC vom iPhone, das Pillow ohne Zusatz
+        # nicht oeffnet. Der Rest sind kaputte oder untergeschobene Dateien.
+        raise PostError(
+            "Die Datei liess sich nicht als Bild oeffnen. Moeglich ist ein "
+            "nicht unterstuetztes Format wie HEIC von neueren iPhones -- "
+            "dann beim Export JPEG waehlen."
+        ) from exc
+
+    # Handyfotos stehen oft nur ueber ein EXIF-Feld richtig herum.
+    bild = ImageOps.exif_transpose(bild)
+    bild = bild.convert("RGBA" if "A" in bild.getbands() else "RGB")
+    bild.thumbnail((BILD_BREITE, BILD_BREITE), Image.LANCZOS)
+
+    ziel = io.BytesIO()
+    bild.save(ziel, "WEBP", quality=BILD_QUALITAET, method=4)
+    return ziel.getvalue(), bild.width, bild.height
+
+
 def read_entry(path: Path) -> dict:
     try:
         raw = path.read_text(encoding="utf-8")
@@ -406,6 +453,64 @@ class CMSHandler(SimpleHTTPRequestHandler):
             raise PostError("Pfad liegt ausserhalb des Sektionsordners.")
         return path
 
+    def upload_dir(self, jahr: str) -> Path:
+        ordner = (self.site_dir / "static" / UPLOAD_DIR / jahr).resolve()
+        if not ordner.is_relative_to((self.site_dir / "static").resolve()):
+            raise PostError("Ordner liegt ausserhalb von static/.")
+        return ordner
+
+    def upload_entgegennehmen(self) -> None:
+        art = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        # Ein fremdes <form> kann kein image/* schicken -- das ist der Schutz
+        # davor, dass eine andere Webseite hier heimlich etwas ablegt.
+        if not art.startswith("image/"):
+            raise PostError("Anfrage muss ein Bild sein (Content-Type image/...).")
+
+        laenge = int(self.headers.get("Content-Length") or 0)
+        if laenge <= 0:
+            raise PostError("Leere Anfrage.")
+        if laenge > UPLOAD_MAX_BYTES:
+            raise PostError(f"Bild ist groesser als {UPLOAD_MAX_BYTES // 1024 // 1024} MB.")
+
+        rohdaten = self.rfile.read(laenge)
+        webp, breite, hoehe = bild_umwandeln(rohdaten)
+
+        # Der Name kommt URL-kodiert im Header, damit auch Umlaute ankommen.
+        roh_name = unquote(self.headers.get("X-Dateiname") or "bild")
+        stamm = slugify(Path(roh_name).stem) or "bild"
+        jahr = date.today().strftime("%Y")
+
+        with CMSHandler.schreib_sperre:
+            ordner = self.upload_dir(jahr)
+            ordner.mkdir(parents=True, exist_ok=True)
+            ziel = ordner / f"{stamm}.webp"
+            zaehler = 2
+            while ziel.exists():
+                ziel = ordner / f"{stamm}-{zaehler}.webp"
+                zaehler += 1
+            ziel.write_bytes(webp)
+            self.log_message("Bild: %s (%d KB, %dx%d)", ziel.name,
+                             len(webp) // 1024, breite, hoehe)
+            antwort = {
+                "url": f"/{UPLOAD_DIR}/{jahr}/{ziel.name}",
+                "breite": breite, "hoehe": hoehe, "bytes": len(webp),
+                "build": self.bauen(),
+                "git": self.sichern(f"Bild {ziel.name} hinzugefuegt", [ziel]),
+            }
+        self.send_json(antwort, 201)
+
+    def upload_ausliefern(self, jahr: str, name: str) -> None:
+        """Damit das Bild schon in der Vorschau erscheint, bevor Hugo es kopiert."""
+        pfad = (self.upload_dir(jahr) / name).resolve()
+        if pfad.parent != self.upload_dir(jahr) or not pfad.is_file():
+            raise FileNotFoundError(f"Bild nicht gefunden: {jahr}/{name}")
+        daten = pfad.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/webp")
+        self.send_header("Content-Length", str(len(daten)))
+        self.end_headers()
+        self.wfile.write(daten)
+
     def bauen(self) -> dict:
         """Seite neu erzeugen und das Ergebnis fuer die Antwort aufbereiten."""
         if self.hugo is None:
@@ -477,12 +582,19 @@ class CMSHandler(SimpleHTTPRequestHandler):
             else:
                 self.guard(lambda: self.send_json(self.list_entries(section_id)))
             return
+        treffer = UPLOAD_ROUTE.fullmatch(self.path)
+        if treffer:
+            self.guard(lambda: self.upload_ausliefern(*treffer.groups()))
+            return
         if self.path.startswith("/api/"):
             self.send_json({"error": "Unbekannte Route."}, 404)
             return
         super().do_GET()
 
     def do_POST(self) -> None:
+        if self.path == "/api/uploads":
+            self.guard(self.upload_entgegennehmen)
+            return
         treffer = ENTRIES_ROUTE.fullmatch(self.path)
         if treffer and not treffer.group(2):
             self.guard(lambda: self.create_entry(treffer.group(1)))

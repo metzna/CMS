@@ -77,6 +77,20 @@ Seite neu bauen. Das übernimmt das CMS automatisch.
 7. Der Ring wird zum **Haken**, oder bei einem Problem zum **Kreuz** mit
    einer Erklärung in der Statuszeile.
 
+### Bilder
+
+Über den Knopf **Bild** oder durch Hineinziehen ins Textfeld. Das CMS rechnet
+jedes Bild sofort in das platzsparende Format **WebP** um und verkleinert es
+auf höchstens 2000 Pixel. Aus einem Handyfoto von mehreren Megabyte werden so
+etwa 200 Kilobyte, ohne sichtbaren Qualitätsverlust. Das hat drei Vorteile:
+
+- Die Seite lädt für Besucher deutlich schneller.
+- Nur die kleine Fassung landet in der Versionsgeschichte, die sonst mit
+  jedem Foto dauerhaft anwachsen würde.
+- Beim Umrechnen wird die Datei neu aufgebaut. Was kein echtes Bild ist,
+  fliegt dabei raus, und die **EXIF-Daten verschwinden** — in Handyfotos
+  steht dort oft der genaue Aufnahmeort.
+
 Die wichtigste Zusage: **Gespeichert ist immer.** Selbst wenn ein späterer
 Schritt scheitert, ist der Text nicht verloren. Die Statuszeile sagt genau,
 welcher Schritt nicht geklappt hat:
@@ -420,7 +434,6 @@ Einrichten auffallen, nicht erst beim Kunden.
   Kunden die Angriffe aus der Tabelle oben einmal von außen durchprobieren.
 - **Sicherung außer Haus aus dem Container:** Dafür braucht der Container
   einen Deploy-Key. Ist vorbereitet, aber noch nicht eingerichtet.
-- **Bilder hochladen** gibt es noch nicht.
 - **Überwachung:** Wenn nachts ein Container neu startet, merkt es noch
   niemand.
 - Vorgeschlagen, aber nicht gebaut: `--passwort` erzeugt selbst ein
@@ -452,6 +465,9 @@ Damit darf der Server Sicherungen schicken, sonst nichts.
 
 **forward_auth** – Die Caddy-Funktion „vor dem Durchlassen erst die
 Anmeldung fragen".
+
+**EXIF** – Zusatzdaten in Fotos: Kameramodell, Zeitpunkt, oft auch der
+Aufnahmeort. Beim Hochladen werden sie entfernt.
 
 **Frontmatter** – Der Kopf einer Beitragsdatei zwischen den `---`-Zeilen, mit
 Titel, Datum und Entwurf-Markierung.
@@ -485,6 +501,9 @@ Nur wer den geheimen Schlüssel hat, kann sie erzeugen.
 darf, hängt davon ab.
 
 **VPS** – Virtual Private Server: ein gemieteter Server im Rechenzentrum.
+
+**WebP** – Modernes Bildformat, deutlich kleiner als JPEG bei gleicher
+Qualität. Alle heutigen Browser können es.
 
 **Volume** – Ein Ordner auf dem Server, der in einen Container
 hineingereicht wird. Was darin liegt, überlebt jedes Update.

@@ -10,8 +10,10 @@ Sektion ist auf genau einen Ordner verknüpft.
 python3 cms/server.py          # http://127.0.0.1:8080
 ```
 
-Nur die Python-Standardbibliothek, nichts zu installieren — ausser Hugo
-selbst, das nach jedem Schreiben laeuft.
+Ausser Hugo, das nach jedem Schreiben laeuft, braucht es nur **Pillow** fuer
+den Bild-Upload (`pip install Pillow`). Ohne Pillow laeuft alles Uebrige, nur
+Bilder lassen sich dann nicht hochladen. Sonst reicht die
+Python-Standardbibliothek.
 Optionen: `--port`, `--host`, `--content <ordner>`, `--config <datei>`,
 `--hugo <programm>`, `--kein-build`.
 
@@ -64,6 +66,41 @@ Zukunft, und Hugo laesst den Beitrag als terminiert aus dem Build heraus --
 ohne Fehler, mit Exit-Code 0. Das CMS meldet dann "gespeichert und erzeugt",
 und der Beitrag steht trotzdem nicht auf der Seite. Nachts geschriebene
 Beitraege erscheinen so erst Stunden spaeter.
+
+## Bilder
+
+**Bild** in der Werkzeugleiste oeffnet die Dateiauswahl; ein Bild laesst sich
+auch einfach ins Textfeld ziehen. Danach steht die Markdown-Zeile an der
+Cursorposition, und der Platzhalter `Bildbeschreibung` ist markiert, damit
+er gleich ueberschrieben werden kann:
+
+```markdown
+![Bildbeschreibung](/uploads/2026/hoffest-im-sommer.webp)
+```
+
+Beim Hochladen rechnet das CMS jedes Bild in **WebP** um: laengere Kante
+hoechstens 2000 px, Qualitaet 80. Aus einem Foto von 1,1 MB werden so rund
+200 KB, etwa 43 % weniger als ein gleichwertiges JPEG. Gespeichert wird nur
+diese Fassung, unter `static/uploads/<jahr>/`. Hugo kopiert `static/`
+unveraendert, das Bild ist also sofort auf der Seite; das CMS liefert es
+zusaetzlich selbst aus, damit es schon in der Vorschau erscheint.
+
+Das Umrechnen ist zugleich die Pruefung: Was Pillow nicht als Bild oeffnen
+kann, wird abgewiesen. Damit landet nie eine fremde Datei unveraendert auf
+der Kundenseite. Nebenbei verschwinden alle **EXIF-Daten**, in Handyfotos
+steht dort oft der Aufnahmeort.
+
+Grenzen:
+
+- Hoechstens 25 MB je Datei.
+- Kein Loeschen und kein Umbenennen ueber die Oberflaeche; nicht mehr
+  benutzte Bilder bleiben im Ordner liegen.
+- HEIC (neuere iPhones) kann Pillow ohne Zusatzpaket nicht oeffnen. Die
+  Meldung sagt das und rat zu JPEG. Wer es braucht: `pip install pillow-heif`
+  und im Code registrieren.
+- Aus einem animierten GIF wird ein Standbild.
+- Werte fuer Breite und Qualitaet stehen oben in `server.py`
+  (`BILD_BREITE`, `BILD_QUALITAET`).
 
 ## Versionsgeschichte und Sicherung
 

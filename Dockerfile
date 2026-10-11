@@ -39,6 +39,10 @@ RUN set -eux; \
 
 COPY --from=hugo /usr/local/bin/hugo /usr/local/bin/hugo
 
+# Pillow rechnet hochgeladene Bilder in WebP um. Einziges Paket ausserhalb
+# der Standardbibliothek; es gibt fertige Wheels, nichts wird kompiliert.
+RUN pip install --no-cache-dir --root-user-action=ignore "Pillow==11.1.0"
+
 # UID muss dem Eigentuemer des gemounteten Ordners auf dem Host entsprechen,
 # sonst kann das CMS nicht schreiben. Notfalls beim Bauen anpassen.
 ARG CMS_UID=1000
