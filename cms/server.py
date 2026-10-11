@@ -54,6 +54,8 @@ RESERVED = {"_index.md", "index.md"}
 # Hugo copies static/ unchanged, so the image is on the site without extra work.
 UPLOAD_DIR = "uploads"
 UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+# A post is text; 2 MB is far beyond any real one but keeps memory bounded.
+JSON_MAX_BYTES = 2 * 1024 * 1024
 IMAGE_MAX_EDGE = 2000       # longer edge, enough for any screen
 IMAGE_QUALITY = 80          # turns 1.1 MB into roughly 200 KB
 UPLOAD_ROUTE = re.compile(r"^/uploads/(\d{4})/([a-z0-9][a-z0-9._-]*\.webp)$")
@@ -417,13 +419,28 @@ class CMSHandler(SimpleHTTPRequestHandler):
         kind = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if kind != "application/json":
             raise PostError("Request must be application/json.")
-        length = int(self.headers.get("Content-Length") or 0)
-        if not length:
-            raise PostError("Empty request.")
+        length = self.content_length(JSON_MAX_BYTES, "Request")
         try:
             return json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PostError(f"Invalid JSON: {exc}") from exc
+
+    def content_length(self, limit: int, what: str) -> int:
+        """Validated body length, checked before anything is read.
+
+        rfile.read(-1) reads until the client closes the connection, so a
+        negative value would tie up the thread; an oversized one would land
+        in memory in full.
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise PostError("Invalid Content-Length.") from None
+        if length <= 0:
+            raise PostError("Empty request.")
+        if length > limit:
+            raise PostError(f"{what} is larger than {limit // 1024 // 1024} MB.")
+        return length
 
     def section(self, section_id: str) -> dict:
         for entry in self.sections:
@@ -464,12 +481,7 @@ class CMSHandler(SimpleHTTPRequestHandler):
         if not kind.startswith("image/"):
             raise PostError("Request must be an image (Content-Type image/...).")
 
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0:
-            raise PostError("Empty request.")
-        if length > UPLOAD_MAX_BYTES:
-            raise PostError(f"Image is larger than {UPLOAD_MAX_BYTES // 1024 // 1024} MB.")
-
+        length = self.content_length(UPLOAD_MAX_BYTES, "Image")
         raw = self.rfile.read(length)
         webp, width, height = convert_image(raw)
 

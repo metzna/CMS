@@ -62,13 +62,33 @@ function escapeHtml(text) {
   ));
 }
 
+// Only relative URLs and http(s)/mailto get through; javascript:, data: and
+// the like would run code in the CMS on click. Browsers ignore leading control
+// characters, so "\x01javascript:" counts as javascript: -- reject those too.
+// Entities are no way around this: the text is escaped before parsing, so
+// "&#106;avascript:" stays literal.
+const SAFE_SCHEMES = ["http", "https", "mailto"];
+
+function safeUrl(url) {
+  if (/[\x00-\x20\x7f]/.test(url)) return null;
+  const scheme = url.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (!scheme) return url;   // relative: /uploads/..., #anchor, page/
+  return SAFE_SCHEMES.includes(scheme[1].toLowerCase()) ? url : null;
+}
+
 function inline(text) {
   return text
     .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img src="$2" alt="$1">')
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (whole, alt, url) => {
+      const safe = safeUrl(url);
+      return safe ? `<img src="${safe}" alt="${alt}">` : alt;
+    })
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
-    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" rel="noreferrer">$1</a>');
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label, url) => {
+      const safe = safeUrl(url);
+      return safe ? `<a href="${safe}" rel="noreferrer">${label}</a>` : label;
+    });
 }
 
 // Deliberately small: covers what actually appears in the posts.

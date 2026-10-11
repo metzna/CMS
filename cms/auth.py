@@ -310,7 +310,11 @@ class AuthHandler(BaseHTTPRequestHandler):
             self.respond(404, b"Not found.")
             return
 
-        length = min(int(self.headers.get("Content-Length") or 0), 8192)
+        # Clamp to 0..8192: rfile.read(-1) would wait until the client hangs up.
+        try:
+            length = max(0, min(int(self.headers.get("Content-Length") or 0), 8192))
+        except ValueError:
+            length = 0
         form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
         name = form.get("username", [""])[0]
         password = form.get("password", [""])[0]
